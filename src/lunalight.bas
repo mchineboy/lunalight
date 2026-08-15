@@ -1,397 +1,286 @@
-8650 CLR
-8651 PRINTCHR$(142);
-8655 PRINTCHR$(8)
-8658 POKE808,234
-8664 IFAOGOTO8671
-8668 GOSUB11375
-8671 SYS18155
-8676 GOSUB11184
-8679 POKE19079,4
-8684 GOSUB11103
-8687 PRINT""
-8690 V=53248
-8697 C$=" "
-8701 POKE53280,11
-8709 POKE53281,0
-8717 SN=1504
-8721 BC=54272
-8728 S=BC
-8730 IFZ=7THENP=P-1:FE=FE-1:IFP=186THENP=194
-8752 POKEV+17,PEEK(V+17)AND239
-8763 POKEV+27,3
-8768 JS=56320
-8775 DR$(4)=""
-8780 DR$(8)=""
-8785 DR$(1)="N"
-8790 DR$(2)="N"
-8795 DR$(3)="N"
-8800 DR$(5)="N"
-8805 DR$(6)="N"
-8810 DR$(7)="N"
-8815 DR$(9)="N"
-8820 DR$(10)="N"
-8825 T1$="VEL "
-8833 T2$="FUEL"
-8841 T3$="HORZ"
-8850 PN=2040
-8854 FE=1000
-8858 NM=5
-8860 N2=35
-8863 LN=0
-8864 FORLN=0TO12
-8869 READGR
-8872 G=1
-8873 FORG=1TOGR
-8878 READBL
-8881 READS1
-8884 B=1
-8885 FORB=1TOBL
-8890 PK=SN+LN*40+S1
-8899 POKEPK,160
-8903 POKEPK+BC,12
-8908 IFINT(6*RND(1))<3THENPOKEPK+BC,11
-8922 S1=S1+1
-8926 NEXTB
-8929 NEXTG
-8932 NEXTLN
-8935 Y=1
-8936 FORY=1TO5
-8941 READA
-8944 READB
-8947 X=1
-8948 FORX=1TOA
-8953 POKESN+B,100
-8959 POKESN+B+BC,8
-8966 B=B+1
-8970 NEXTX
-8973 NEXTY
-8976 POKEV+41,1
-8982 POKEV+42,6
-8988 POKE2042,253
-8994 POKE2043,254
-9000 POKEV+4,60
-9006 POKEV+5,60
-9012 POKEV+6,60
-9018 POKEV+7,60
-9024 PO=15
-9026 PP=INT(RND(1)*255)
-9033 HM=INT(RND(1)*(50--50)+-50)
-9048 E2=0
-9050 POKEV+39,0
-9056 POKEV+40,0
-9062 POKEV+16,0
-9067 IFN2>90THENN2=90
-9076 P=187
-9079 M2=N2
-9081 N2=N2+5
-9085 POKEV+17,PEEK(V+17)OR16
-9095 PRINT"";
-9098 PRINTTAB(12);
-9100 PRINT"L U N A L I G H T"
-9121 PRINT"                                     "
-9189 PRINT"HI";
-9221 PRINTHS;
-9223 PRINTTAB(18);
-9225 PRINT"SCORE";
-9232 PRINTPT;
-9235 PRINTTAB(32);
-9238 PRINTNM;
-9240 PRINT"LEMS"
-9248 POKE56295,12
-9256 IFQ<8THENPOKEV+21,13:POKES+4,128
-9273 IFFE<1GOTO9446
-9279 GETZ$
-9282 JV=PEEK(JS)
-9286 FR=JVAND16
-9292 JV=15-(JVAND15)
-9300 IFDR$(JV)<>""THENZ$=DR$(JV)
-9314 IFFE<1THENFE=0
-9321 IFZ$=""THENP=P+1:FE=FE-1:IFP=195THENP=187
-9345 IFZ$=""THENP=P-1:FE=FE-1:IFP=186THENP=194
-9369 IFZ$=""THENPOKE1944,134:POKE56216,7:GOTO9396
-9393 GOTO9446
-9396 GETZ$
-9399 IFZ$=""GOTO9396
-9406 IFZ$=""THENPOKE1944,160:POKE56216,12:GOTO9446
-9430 IFZ$=""THENCLR:AO=1:GOTO8651
-9443 GOTO9396
-9446 POKEPN,P
-9449 POKEPN+1,P+Q
-9457 IFQ=8THENPOKES+24,15:POKES+5,128:POKES+6,128:POKES+1,8:POKES,200:POKES+4,129
-9495 IFPEEK(V+31)AND1GOTO10185
-9504 IFFE<1THENQ=0:M2=M2+1:GOTO9585
-9519 IFFR<>16ANDDR$(JV)=""THENQ=8:POKEV+21,15:M2=M2-1:FE=FE-1:GOTO9585
-9551 IFPEEK(653)=2THENQ=8:POKEV+21,15:M2=M2-1:FE=FE-1:GOTO9585
-9578 Q=0
-9581 M2=M2+1
-9585 IFP>188THENIFP<194THENIFQ=8THENM2=M2+2
-9607 IFM2<2THENPRINT"":GOTO9632
-9618 IFM2<4THENPRINT"":GOTO9632
-9629 PRINT""
-9632 PRINT"";
-9636 PRINTTAB(35);
-9639 PRINTT1$;
-9641 PRINTTAB(74);
-9644 PRINTM2;
-9646 PRINTC$
-9648 IFFE<100THENPRINT"":GOTO9676
-9660 IFFE<400THENPRINT"":GOTO9676
-9673 PRINT""
-9676 PRINTTAB(35);
-9679 PRINT"";
-9682 PRINTT2$;
-9684 PRINTTAB(74);
-9687 PRINTFE;
-9689 PRINTC$
-9691 IFHM<-90THENHM=-90
-9702 IFHM>90THENHM=90
-9711 IFHM<>0THENPRINT"":GOTO9725
-9722 PRINT""
-9725 PRINTTAB(35);
-9728 PRINT"";
-9731 PRINTT3$;
-9733 PRINTTAB(114);
-9736 PRINTHM;
-9738 PRINTC$
-9740 IFQ<8GOTO9781
-9747 IFP>191THENHM=HM-1:GOTO9775
-9760 IFP>187ANDP<191THENHM=HM+1
-9775 IFM2>0GOTO9823
-9781 IFQ<8ANDM2<0GOTO9799
-9792 IFQ<8GOTO9823
-9799 POKEV+1,PO
-9804 POKEV+3,PO
-9809 PO=PO-1+INT(ABS(M2)/50)
-9820 GOTO9844
-9823 POKEV+1,PO
-9828 POKEV+3,PO
-9833 PO=PO+1+INT(ABS(M2)/40)
-9844 IFE2GOTO10082
-9848 IFHM>0THENPP=PP+1+INT(HM/15):IFPP>255THENE2=1:PP=-1:POKEV+16,243:GOTO10082
-9882 IFHM<0THENPP=PP-1-INT(-HM/15):IFPP<0THENE2=1:PP=87:POKEV+39,0:POKEV+40,0:GOTO9934
-9922 IFPP>254THENPP=255
-9931 GOTO9943
-9934 POKEV+16,243
-9940 GOTO10142
-9943 POKEV,PP
-9946 POKEV+2,PP
-9951 POKEV+39,11
-9957 POKEV+40,7
-9963 IFQ<8THENFORT=1TO20:NEXT:GOTO10022
-9980 IFM2>0ANDP>189ANDP<193THENPO=PO+1:M2=M2+2
-10003 IFM2<0ANDP>189ANDP<193THENM2=M2+1
-10022 IFPO<30THENPO=29
-10029 IFPO>190ANDPEEK(V+16)=0ANDPP<5GOTO10185
-10047 IFPO>195ANDPEEK(V+16)<>0ANDPP>84GOTO10185
-10066 X=1
-10067 FORX=1TO150-ABS(M2)*6
-10078 NEXT
-10079 GOTO9256
-10082 IFHM>0THENPP=PP+1+INT(HM/15):IFPP>86THENPP=-1:POKEV+39,0:POKEV+40,0:E2=0:GOTO10125
-10122 GOTO10133
-10125 POKEV+16,0
-10130 GOTO9844
-10133 IFHM<0GOTO10142
-10139 GOTO9943
-10142 IFHM<0THENPP=PP-1-INT(-HM/15):IFPP<1THENPP=256:POKEV+16,0:E2=0:GOTO9882
-10176 IFHM>0GOTO10082
-10182 GOTO9943
-10185 IFPO<120GOTO9504
-10192 IFHM<>0GOTO10321
-10198 IFP<>187GOTO10321
-10205 IFM2>3GOTO10321
-10211 IFPP>77ANDPP<81ANDPO>145ANDPO<149GOTO10872
-10233 IFPP>103ANDPP<120ANDPO>225ANDPO<229GOTO10892
-10255 IFPP>157ANDPP<162ANDPO>129ANDPO<133GOTO10919
-10277 IFPP>214ANDPP<217ANDPO>145ANDPO<149GOTO10939
-10299 IFPP>238ANDPP<249ANDPO>201ANDPO<205GOTO10950
-10321 POKES+4,128
-10327 SS=1
-10329 FORSS=1TO4
-10334 POKEV+42+SS,7
-10343 NEXT
-10344 PR=PP
-10347 PL=PP
-10350 IFPP+12>255THENPOKEV+16,96:PR=PP-256
-10371 POKEV+10,PR+12
-10379 POKEV+9,PO-10
-10386 POKEV+12,PR+12
-10394 POKEV+15,PO+10
-10401 IFPEEK(V+16)<>0ANDPP-12<0THENPOKEV+16,96:PL=256+PP:GOTO10441
-10431 IFPP-12<0THENPL=15
-10441 POKEV+14,PL-12
-10449 POKEV+13,PO+10
-10456 POKEV+8,PL-12
-10464 POKEV+11,PO-10
-10471 POKEV+21,252
-10477 POKEV+28,240
-10483 POKEV+37,11
-10489 POKEV+38,2
-10495 POKEV+39,0
-10501 POKEV+40,0
-10507 EX=203
-10510 FOREX=203TO212
-10516 POKES+24,212-EX
-10525 POKES+4,129
-10531 POKES+5,15
-10536 D=1
-10538 FORD=1TO80
-10544 NEXT
-10545 POKES+1,5
-10550 POKES,20
-10553 POKEPN+4,EX
-10559 POKEPN+5,EX+10
-10567 POKEPN+6,EX+20
-10575 POKEPN+7,EX+30
-10583 NEXTEX
-10586 POKES+4,0
-10591 POKES+5,0
-10596 POKEV+21,12
-10601 NM=NM-1
-10605 N2=N2-5
-10609 POKEV+21,13
-10614 POKEV+16,0
-10619 IFPEEK(V+31)AND1GOTO10628
-10628 POKES+4,128
-10634 X=1
-10635 FORX=1TO1000
-10642 NEXT
-10643 IFFE>0THENTP=TP-ABS(M2)*10-ABS(HM)*4
-10662 IFBNTHENTP=TP+500
-10674 PT=PT+TP
-10681 IFPT<1THENPT=0
-10690 IFFE<1THENNM=-1
-10698 IFNM<0THENA$="  GAME OVER":GOTO10765
-10722 IFE7THENE7=0:A$=" +1000 FUEL":GOTO10765
-10748 A$=""+STR$(TP)+" POINTS"
-10765 PRINT"";
-10776 PRINTTAB(14);
-10778 X=1
-10779 FORX=1TOLEN(A$)
-10786 PRINTMID$(A$,X,1);
-10792 GOSUB11103
-10795 NEXTX
-10798 X=1
-10799 FORX=1TO3000
-10806 NEXT
-10807 IFNM<0GOTO10978
-10813 PRINT"";
-10824 PRINTTAB(14);
-10826 X=1
-10827 FORX=1TOLEN(A$)
-10834 PRINT" ";
-10837 GOSUB11103
-10840 NEXTX
-10843 POKEV+39,0
-10849 POKEV+40,0
-10855 BN=0
-10858 TP=0
-10861 X=1
-10862 FORX=1TO200
-10868 NEXT
-10869 GOTO9024
-10872 TP=TP+850
-10880 IFPP=79THENBN=1
-10889 GOTO10966
-10892 IFFE>400GOTO10966
-10900 FE=FE+1000
-10906 E7=1
-10909 TP=TP+200
-10916 GOTO10966
-10919 TP=TP+750
-10927 IFPP=160THENBN=1
-10936 GOTO10966
-10939 TP=TP+1000
-10947 GOTO10966
-10950 TP=TP+250
-10957 IFPP=244THENBN=1
-10966 TP=TP-M2*50
-10975 GOTO10609
-10978 IFPT>HSTHENHS=PT
-10987 RG=RG+1
-10993 IFRG=5THENGOSUB11442
-11002 GETZ$
-11005 CT=CT+1
-11011 JV=PEEK(JS)
-11015 FR=JVAND16
-11021 JV=15-(JVAND15)
-11029 IFFR<>16ANDDR$(JV)=""THENZ$=""
-11046 IFZ$=""THENPT=0:TP=0:NM=5:FE=1000:N2=35:GOTO10813
-11071 IFCT>20000THENCT=0:PT=0:TP=0:NM=5:FE=1000:N2=35:GOTO10813
-11100 GOTO11002
-11103 L=54272
-11110 FORL=54272TO54296
-11120 POKEL,0
-11124 NEXT
-11125 POKE54296,10
-11133 POKE54277,64
-11142 POKE54273,17
-11150 POKE54272,37
-11159 POKE54276,17
-11167 T=1
-11169 FORT=1TO20
-11174 NEXT
-11175 POKE54276,16
-11183 RETURN
-11184 PRINT""
-11187 POKE53280,11
-11195 POKE53281,0
-11203 C=3
-11206 Y=1
-11207 FORY=1TO380
-11214 X=1
-11215 FORX=1TO86
-11221 READA
-11224 POKEA+1229,160
-11232 POKEA+55501,C
-11243 NEXT
-11244 C=C+1
-11250 IFC>4THENC=3
-11259 RESTORE
-11260 PRINT"   PUBLIC DOMAIN 1985 STEVEN HARDISON  "
-11324 PRINT"";
-11327 PRINTTAB(11);
-11329 PRINT"PRESS F7 TO START"
-11351 GETF$
-11354 IFF$=""GOTO11363
-11362 NEXT
-11363 X=1
-11364 FORX=1TO86
-11370 READA
-11373 NEXT
-11374 RETURN
-11375 OPEN15,8,15
-11380 OPEN5,8,5,"#"
-11387 PRINT#15,"B-R:";
-11396 PRINT#15,5;
-11398 PRINT#15,0;
-11400 PRINT#15,1;
-11402 PRINT#15,1
-11403 INPUT#15,C$
-11407 CLOSE5
-11409 CLOSE15
-11411 IFC$=CHR$(48)+CHR$(48)THENRETURN
-11421 POKE53280,1
-11429 POKE53281,1
-11437 PRINT""
-11441 NEW
-11442 GETZ$
-11445 JV=PEEK(JS)
-11449 FR=JVAND16
-11455 JV=15-(JVAND15)
-11463 IFFR<>16ANDDR$(JV)=""THENZ$=""
-11480 CT=CT+1
-11486 IFZ$=""THENRG=-1:CT=20000:RETURN
-11503 IFCT>20000THENCLR:AO=1:GOTO8651
-11517 GOTO11442
-11520 END
-11531 DATA1,15,23,27,41,55,63,67,81,95,97,103,106,107,108,121,135,143,147
-11541 DATA161,163,165,167,168,169,171,172,173,175,177,179,180,181,183,184
-11551 DATA185,187,201,203,205,207,209,213,215,217,219,221,223,225,227,241
-11561 DATA243,245,247,249,251,253,255,257,259,261,263,265,267,281,283,284
-11571 DATA285,287,289,291,292,293,295,297,299,300,301,303,305,307,341,381
-11581 DATA419,420,421,1,3,17,1,4,16,3,3,7,3,18,3,24,2,4,7,7,19,3,1,1,5,6
-11591 DATA6,19,4,2,1,7,6,5,19,5,35,4,2,1,8,6,5,19,7,34,4,3,1,7,5,9,18,8
-11601 DATA33,4,3,1,4,5,8,18,8,33,2,7,1,23,18,2,7,1,24,17,2,7,1,24,17,1,40
-11611 DATA1,3,-23,3,47,5,450,3,64,4,347
+10 rem save"lunalight",8,1
+20 clr:printchr$(8)
+22 rem hot variables first: basic scans the variable table linearly
+24 m2=.:po=.:pz=.:pp=.:hm=.:p=.:q=.:fr=.:jd=.:jv=.:z$="":hz=.:e2=.:tk=.:dt=.:lt=.
+26 w0=53248:w1=53249:w2=53250:w3=53251:w7=53269:w8=53264:w9=53279:nq=2041:sf=54276
+27 fm=.:fh=227:fx=.:fy=.:rz=1:rem x-msb writes carry the flag: bit 4 is sprite 4, 227 is 243 less that bit
 
+28 ka=.03:gv=.:th=.:t6=.:fe=.:am=.:ae=.:ah=.:av=.:af=.:ap=.:aa=.:ag=.:tx=.:al=.:cd=.:cc=.:cr=.:cv=.:ch=.:cn=.:xz=.:q$="":rb=18432:ri=.
+29 rv$="lunalight":bp=.:js=56320:bl$="                                        ":rem spc() only moves the cursor; blanking needs real spaces
+30 dimpx(5),pw(5),py(5),pb(5),rf(5),ph(5),h(39)
+35 gosub1800:sys16896:gosub1850:gosub1020:gosub990
+40 print"{clr}":v=53248:js=56320:sn=1504:s=54272:bc=54272:c$="{left} ":poke53280,11:poke53281,0
+50 t1$="{rvon}vel {rvof}":t2$="{rvon}fuel{rvof}":t3$="{rvon}horz{rvof}":ep=250:hp=-8
+55 om2=-999:ofe=-999:ohm=-999:o1=-1:o2=-1:o3=-1
+60 pn=2040:fe=1000:fu=fe:nm=4:nf=.:n2=ni:gosub1100
+70 pokev+41,1:pokev+42,6:poke2042,253:poke2043,254
+80 pokev+4,60:pokev+5,60:pokev+6,60:pokev+7,60
+90 po=28:pz=28:pp=ep:hm=hp:ep=ep-23:ifep=20thenep=250
+95 ifam=.then100
+96 iffe<450thenpt=.:goto60
+97 gosub1920
+100 hp=hp+2:ifhp>8thenhp=-8
+110 e2=.:hz=.:x=peek(v+31):pokev+39,0:pokev+40,0:pokew8,fm
+112 ifam=.then120
+114 wx=tx-56:ifwx<32thenwx=tx+56
+116 pp=wx:ifwx>255thene2=1:pp=wx-256:pokew8,fh
+120 ifn2>nc thenn2=nb
+130 p=187:m2=n2*10:n2=n2+ns:pokev+17,peek(v+17)or16
+135 lt=ti:pokev+21,29:pokev+39,12:pokev+40,8:gosub1500:gosub1600:o1=-1:o2=-1:o3=-1:rem print recoloured the labels
+160 dt=ti-lt:ifdt<.thendt=1
+165 ifdt>3thendt=3
+170 lt=ti
+172 fortk=1todt:gosub200:ifhzthen639
+176 next:goto500
+200 getz$:jv=peek(js):ifam=.then205
+202 ifz$<>""then20
+204 if(jvand31)<>31then20
+205 fr=jvand16:jd=15-(jvand15)
+206 ifz$=""then210
+207 ifz$="{rght}"thenjd=8
+208 ifz$="{down}"thenjd=4
+209 ifz$="{f1}"thenpoke1024,134:poke55296,7:goto1270
+210 ifjd=8thenifp<>189thenp=p+1:ifp=195thenp=187
+220 ifjd=4thenifp<>193thenp=p-1:ifp=186thenp=194
+225 ifam=.then240
+226 iffe<20thenpt=.:goto60
+227 gosub1950
+240 iffe<4then270
+250 iffr<>16orpeek(653)thenpokew7,31:q=8:fe=fe-4:goto280
+270 q=.:m2=m2+gv:pokew7,29:pokesf,128:goto330
+280 pokes+24,15:pokes+5,128:pokes+6,128:pokes+1,4:pokes,100:pokes+4,129
+290 onp-186goto300,305,315,330,330,330,320,310
+300 m2=m2-th:goto330
+305 m2=m2-th+1:hm=hm+1:goto330
+310 m2=m2-th+1:hm=hm-1:goto330
+315 m2=m2-t6:hm=hm+1:goto330
+320 m2=m2-t6:hm=hm-1
+330 pz=pz+m2*ka:ifpz<25thenpz=25
+340 po=int(pz):pp=pp+hm
+360 ife2=.thenifpp<1thene2=1:pp=87+pp:pokew8,fh:goto430
+370 ife2=1thenifpp<1thene2=.:pp=255+pp:pokew8,fm:goto430
+380 ife2=.thenifpp>255thene2=1:pp=pp-255:pokew8,fh:goto430
+390 ife2thenifpp>86thene2=.:pp=pp-87:pokew8,fm
+430 pokew0,pp:pokew1,po:pokew2,pp:pokew3,po
+440 pokepn,p:pokenq,p+q
+470 ifpeek(w9)and1thenifpo>120thenhz=1:rem read every step; the latch must not go stale
+480 ifpo>190thenife2=.thenifpp<5thenhz=1
+490 ifpo>195thenife2thenifpp>84thenhz=1
+495 return
+500 vm=int(m2/10):ifhm>20thenhm=20
+510 ifhm<-20thenhm=-20
+520 c1=5:ifvm>=3thenc1=7
+525 ifvm>slthenc1=2
+530 ifvm<>om2thenom2=vm:gosub1620
+532 ifc1<>o1theno1=c1:cd=55371:cc=c1:gosub1680
+540 c2=5:iffe<400thenc2=7
+545 iffe<100thenc2=2
+550 iffe<>ofethenofe=fe:gosub1640
+552 ifc2<>o2theno2=c2:cd=55451:cc=c2:gosub1680
+560 c3=5:ifhm<>.thenc3=7
+562 ifhm>2orhm<-2thenc3=2
+570 ifhm<>ohmthenohm=hm:gosub1660
+572 ifc3<>o3theno3=c3:cd=55531:cc=c3:gosub1680
+630 goto160
+639 vm=int(m2/10):xz=.:rem verdict must use current velocity, not the hud copy
+640 ifhm>2goto1320
+641 ifhm<-2goto1320
+642 ifp<>187goto1320
+644 ifvm>slgoto1320
+649 pf=pp:ife2thenpf=pf+256
+650 lz=.:fori=1to5
+660 ifpf<px(i)orpf>=px(i)+pw(i)*8then690
+670 ifabs(po-py(i))>4then690
+680 lz=i:tp=tp+pb(i):i=5
+690 next
+700 iflz=.thenxz=1:goto1320
+705 ifrf(lz)<>.andfe<=399thenfe=1000:e7=1
+720 pokev+21,29:pokew8,fm:hz=.:gosub1210
+730 pokes+4,128:forx=1to200:next
+740 cx=px(lz)+pw(lz)*4:ifabs(pf-cx)<3thenbs=int(pb(lz)*2/3)
+752 tp=tp-abs(vm)*30
+753 tp=tp-abs(hm)*30
+754 tp=tp-(fu-fe)
+755 tp=tp+bs
+760 pt=pt+tp:ifpt<1thenpt=.
+770 ifcrthengosub1700
+775 bs=bs-(fu-fe):ifbs>.thena$="{cyn} "+str$(bs)+" bonus":gosub982
+778 a$="{cyn}"+str$(int(tp))+" points":gosub982
+780 ife7thene7=.:a$="{lgrn}fuel tanks full":gosub982
+785 ifnm<.orfe<4thennf=1:nm=.
+790 ifnf=1thena$="{rvof}{orng}game over":ep=250:hp=-20:ifpt>hsthenifam=.thenhs=pt:gosub1500
+795 ifnfthenifamthenpt=.:goto60
+797 ifnfgoto982
+840 tp=.:fu=fe:bs=.:forx=1to100:next:goto90
+960 getz$:jv=peek(js):fr=jvand16
+965 iffr<>16thenz$="{f7}"
+970 ifz$="{f7}"thenpt=.:tp=.:nm=4:nf=.:fe=1000:n2=ni:gosub986:gosub1100:goto840
+980 goto960
+982 print"{home}{down}{down}{down}{down}{down}{down}{down}{down}"bl$;
+983 print"{home}{down}{down}{down}{down}{down}{down}{down}{down}";spc((42-len(a$))/2);:forx=1tolen(a$):printmid$(a$,x,1);
+984 gosub990:next
+985 forx=1to1500:next:ifnfgoto960
+986 print"{home}{down}{down}{down}{down}{down}{down}{down}{down}"bl$;
+987 return
+988 rem skip voice 3: zero freq freezes its noise register
+989 rem
+990 forl=54272to54285:pokel,0:next:forl=54293to54296:pokel,0:next
+1000 poke54296,10:poke54277,64:poke54273,17:poke54272,37:poke54276,17
+1010 fort=1to20:next:poke54276,16:return
+1020 print"{clr}":poke53280,11:poke53281,0:pokew7,.
+1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
+1040 poke214,12:print:print"{lblu}   public domain 2024 steven hardison"
+1045 poke214,14:print:printtab(10)"{cyn}f5 moon   f3 mars"
+1060 printtab(11);
+1070 print"press {rvon}f7{rvof} to start"
+1072 sys17408:rem tod entropy, ~3s; f5/f3 rejoin at 1075 to skip it
+1075 printtab(11);:ifbp=.thenprint"{yel}planet: moon {left}"
+1076 ifbpthenprint"{orng}planet: mars {left}"
+1077 printtab(7)"{lblu}attract mode in 20 seconds"
+1078 t0=ti
+1080 getf$:iff$="{f5}"thenbp=.:gosub1800:goto1075
+1085 iff$="{f3}"thenbp=1:gosub1800:goto1075
+1090 iff$="{f7}"thensys17414:return
+1091 iff$<>""thent0=ti
+1092 if(peek(56320)and31)<>31thent0=ti
+1093 tt=ti-t0:iftt<.thentt=tt+5184000
+1094 iftt>=1200thenam=1:return
+1095 goto1080
+1100 rem sid-random mountain terrain: high, low and middle pads
+1105 print"{clr}":pokew7,.:gosub1850:sys17411:ri=.:tc=12:td=11:ifbp thentc=2:td=9
+1107 hh=3:sg=.
+1110 forc=0to39:ifsg>0then1122
+1115 gosub1900:tg=1+int(rv*12/256):gosub1900:sg=3+int(rv*5/256)
+1120 iftg=hhthentg=13-hh
+1122 ds=sgn(tg-hh):gosub1900:ifrv<64thends=ds*2
+1125 hh=hh+ds:ifhh<1thenhh=1
+1130 ifhh>12thenhh=12
+1132 h(c)=hh:sg=sg-1:next
+1133 forc=1to38:gosub1900:ifrv<52thenh(c)=h(c)+(rvand2)-1
+1134 ifh(c)<1thenh(c)=1
+1135 ifh(c)>12thenh(c)=12
+1136 next:px(1)=1:px(2)=9:px(3)=17:px(4)=25:px(5)=33
+1137 gosub1900:ro=int(rv*5/256):fz=.
+1140 fori=1to5:gosub1900:cs=px(i)+int(rv*3/256)
+1142 gosub1900:pw(i)=3+(rvand1):ce=cs+pw(i)-1:rf(i)=.
+1143 zz=i+ro:ifzz>5thenzz=zz-5
+1145 ifzz=1orzz=3thengosub1900:hh=9+int(rv*4/256):goto1151
+1147 ifzz=2orzz=5thengosub1900:hh=3+(rvand1):goto1151
+1150 gosub1900:hh=5+int(rv*4/256)
+1151 pb(i)=600:ifhh>8thenpb(i)=800
+1152 ifhh<5thenpb(i)=500:iffz=.thenrf(i)=1:fz=1:rz=i
+1153 ph(i)=hh:forc=cstoce:h(c)=hh:next
+1155 ford=1to2:ifcs-d>=.thenifhh>8thenh(cs-d)=hh-d
+1157 ifce+d<40thenifhh>8thenh(ce+d)=hh-d
+1160 ifcs-d>=.thenifhh<4thenh(cs-d)=hh+d*2
+1162 ifce+d<40thenifhh<4thenh(ce+d)=hh+d*2
+1163 ifcs-d>=.thenifhh>=4andhh<=8thenh(cs-d)=hh+int(d/2)
+1164 ifce+d<40thenifhh>=4andhh<=8thenh(ce+d)=hh+int(d/2)
+1165 nextd:py(i)=242-hh*8:px(i)=24+cs*8:nexti
+1170 rem pad bonuses follow elevation; first low pad refuels
+1175 forc=0to39:ht=h(c):forln=0to12
+1180 pk=sn+ln*40+c:ifln<13-htthen1190
+1182 pokepk,160:gosub1900:pokepk+bc,tc:if(rvand3)=((c*17+ln*31)and3)thenpokepk+bc,td
+1190 nextln:nextc
+1192 fori=1to5:cs=int((px(i)-24)/8):ce=cs+pw(i)-1:ln=13-ph(i):pk=sn+ln*40
+1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
+1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
+1197 fx=px(rz)-3:fm=.:iffx>255thenfm=16:fx=fx-256
+1198 fh=227+fm:fy=py(rz)-27:gosub1210
+1200 poke56295,14:poke2023,160:print"{home}":om2=-999:ofe=-999:ohm=-999
+1205 o1=-1:o2=-1:o3=-1:return
+1210 rem refuel flag on sprite 4; the explosion borrows it, so re-establish all of it
+1212 poke2044,243:pokev+8,fx:pokev+9,fy:pokev+43,3:pokev+23,16:pokev+28,.:return
+1270 getz$:jv=peek(js):fr=jvand16
+1275 iffr<>16thenz$="{f1}"
+1280 ifz$="{f1}"thenpoke1024,160:poke55296,0:lt=ti:return
+1290 ifz$="{f7}"then20
+1300 ifz$="{home}"thenprintrv$;:stop
+1310 goto1270
+1320 pokes+4,128:pr=pp:lp=pp:cr=1
+1325 pokepn+4,203:pokepn+5,213:pokepn+6,223:pokepn+7,233
+1330 ifpp+12>255thenpokev+16,96:pr=pp-256
+1340 pokev+10,pr+12:pokev+9,po-10:pokev+12,pr+12:pokev+15,po+10
+1350 ifpeek(v+16)<>.thenifpp-12<.thenpokev+16,96:lp=256+pp:goto1370
+1360 ifpp-12<.thenlp=15
+1370 pokev+14,lp-12:pokev+13,po+10:pokev+8,lp-12:pokev+11,po-10
+1375 forss=1to4:pokev+42+ss,7:next
+1380 pokev+28,240:pokev+37,11:pokev+38,2:pokev+39,0:pokev+40,0:pokev+21,252
+1390 forex=203to212:pokepn+4,ex:pokepn+5,ex+10:pokepn+6,ex+20:pokepn+7,ex+30
+1395 pokes+24,212-ex:pokes+4,129:pokes+5,15:pokes+1,5:pokes,20:ford=1to60:next:nextex
+1410 pokes+4,0:pokes+5,0:pokev+1,12:pokev+21,12
+1415 nm=nm-1:n2=n2-ns:lz=.:bs=.:hz=.:tp=.
+1420 goto720
+1500 poke214,23:print:print"{rvon}{lblu}                                       ";
+1510 poke214,23:print:print"{rvon}{lblu} hi";hs;tab(17);"score";pt;:printtab(32);nm;"lems";
+1515 ifamthenprint"{home}{rvon}{lblu} attract "
+1520 return
+1600 print"{home}{down}"spc(35)t1$
+1612 print"{home}{down}{down}{down}"spc(35)t2$
+1614 print"{home}{down}{down}{down}{down}{down}"spc(35)t3$
+1616 return
+1620 a$=right$("   "+str$(vm),3):ad=1024+80+36
+1624 fori=0to2:pokead+i,asc(mid$(a$,i+1,1)):next:return
+1640 a$=right$("    "+str$(fe),4):ad=1024+160+35
+1642 fori=0to3:pokead+i,asc(mid$(a$,i+1,1)):next:return
+1660 a$=right$("   "+str$(hm),3):ad=1024+240+36
+1662 fori=0to2:pokead+i,asc(mid$(a$,i+1,1)):next:return
+1680 rem colour the 4-cell label row and the value row beneath it
+1682 fori=.to3:pokecd+i,cc:pokecd+40+i,cc:next:return
+1700 rem crash post-mortem: cause line, then a rotating consequence
+1702 cr=.:cv=abs(vm):ch=abs(hm)
+1704 a$="{red}you rearranged the landscape"
+1706 ifxzthena$="{red}boulders are not landing pads"
+1708 ifch>2thena$="{red}you cartwheeled"+str$(ch*7)+" feet"
+1710 ifp<>187thena$="{red}lems do not land sideways"
+1712 ifcv>slthena$="{red}new crater"+str$(cv*3)+" feet deep"
+1714 gosub982:cn=(cn+1+peek(162))and15:ifcn>12thencn=cn-13:rem jiffy, not osc3; 13 items
+1716 restore:forx=.tocn:readq$:next
+1718 a$="{yel}"+q$:gosub982:return
+1800 rem moon bp=0 / mars bp=1; gv/th tenths of velocity per physics step
+1810 ifbp=.thengv=20:th=20:ni=18:nb=28:nc=35:ns=3:sl=5:t6=3:return
+1820 gv=46:th=34:ni=24:nb=33:nc=41:ns=4:sl=8:t6=5:return
+1850 rem sid voice 3 noise oscillator random source
+1860 poke54286,255:poke54287,255:poke54290,128:return
+1899 rem table is refilled per terrain; worst case is 654 draws of 1024
+1900 rv=peek(rb+ri):ri=ri+1:return
+1920 rem next demo pad; aim where the lander rests wholly on pad cells
+1922 ak=ak+1:ifak>5thenak=1
+1924 al=ak:tx=px(al)+(pw(al)-3)*4:ap=.:return
+1950 rem autopilot: cruise clear of terrain, then drop straight in
+1952 ae=tx-pp:ife2thenae=ae-256
+1954 ifapthen1980
+1956 av=.:ifpo>112thenav=-4
+1958 ifpo<96thenav=4
+1960 aa=abs(ae):ah=.:ifaa>.thenah=1
+1961 ifaa>4thenah=2
+1962 ifaa>12thenah=3
+1963 ifaa>25thenah=4
+1964 ifaa>40thenah=6
+1966 ifae<.thenah=-ah
+1968 ifae=.thenifhm=.thenifpo>96thenap=1
+1970 goto2000
+1980 ag=py(al)-po:av=3
+1982 ifag>8thenav=6
+1984 ifag>25thenav=12
+1986 ifag>60thenav=25
+1988 ah=.:ifae<>.thenap=.
+2000 af=.:ifint(m2/10)>avthenaf=1
+2005 ifhm<ahthenp=188:fr=.:return
+2010 ifhm>ahthenp=194:fr=.:return
+2015 p=187:fr=16:ifafthenfr=.
+2020 return
+2100 rem crash consequences; restore indexes these by jiffy
+2102 data"salvage crews found one boot"
+2104 data"houston is billing your estate"
+2106 data"taxpayers demand an inquiry"
+2108 data"your damage deposit is forfeit"
+2110 data"next of kin have been notified"
+2112 data"underwriters call it pilot error"
+2114 data"you also flattened the flag"
+2116 data"the parked rover is now scrap"
+2118 data"another 100 megabucks well spent"
+2122 data"aux tanks are now lunar confetti"
+2124 data"your crater needs its own postcode"
+2126 data"mission control muted your channel"
+2130 data"your flight recorder just resigned"

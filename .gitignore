@@ -1,0 +1,7 @@
+build/
+.DS_Store
+from_dads_nas/
+pkg/
+bin/
+tools/mospeed/basicv2.jar
+tools/reblitz64/
