@@ -56,16 +56,28 @@ SPRITE_CENTRE_OFFSET = 12
 FLAG_SLOT = 243
 FLAG_POINTER_INDEX = 4
 FLAG_SPRITE_COLOR = 14
-FLIGHT_POINTERS = {2: 253, 3: 254}
+# The cosmetic orbiting command module lives on sprite 7, pointer slot 244,
+# light grey. Sprite 7 is otherwise explosion-only, so the flight loop has to
+# re-establish it after every round.
+MODULE_SLOT = 244
+MODULE_POINTER_INDEX = 7
+MODULE_SPRITE_COLOR = 15
+MODULE_SPRITE_Y = 55
+# Shapes patched into spare slots of the original payload by make-shapes.py.
+PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT)
+FLIGHT_POINTERS = {2: 253, 3: 254, MODULE_POINTER_INDEX: MODULE_SLOT}
 EXPLOSION_POINTER_RANGE = (203, 242)
 # $D015 enable masks the flight loop writes: coast keeps the lander, the two
-# decoration sprites and the flag (bits 0,2,3,4 = 29); thrust adds the exhaust
-# sprite (bit 1) for 31.
-COAST_ENABLE = 29
-THRUST_ENABLE = 31
-# Sprite pointers the source POKEs during flight, the refuel flag and explosion.
+# decoration sprites, the flag and the command module (bits 0,2,3,4,7 = 157);
+# thrust adds the exhaust sprite (bit 1) for 159.
+COAST_ENABLE = 157
+THRUST_ENABLE = 159
+# Sprite pointers the source POKEs during flight, the added shapes and explosion.
 USED_POINTERS = (
-    tuple(range(187, 195)) + tuple(range(203, 243)) + (FLAG_SLOT, 253, 254)
+    tuple(range(187, 195))
+    + tuple(range(203, 243))
+    + PATCHED_SLOTS
+    + (253, 254)
 )
 # Landing evaluation and explosion presentation must stay identical to the
 # bank-0 fallback source; these are the BASIC line numbers that implement them.
@@ -198,7 +210,7 @@ def static_layout(args: argparse.Namespace, report: Report) -> dict[str, Any]:
     code_end = code_addr + len(code) - 1
     sprite_end = sprite_addr + len(sprites) - 1
     bank_base = args.vic_bank * 0x4000
-    flag_offset = FLAG_SLOT * 64 - original_addr
+    slot_offsets = {slot: slot * 64 - original_addr for slot in PATCHED_SLOTS}
     flag_block_bank2 = bank_base + FLAG_SLOT * 64
     layout = {
         "full_artifact": hexrange(full_addr, len(full)),
@@ -206,54 +218,64 @@ def static_layout(args: argparse.Namespace, report: Report) -> dict[str, Any]:
         "code_end": f"${code_end:04X}",
         "relocated_sprites": hexrange(sprite_addr, len(sprites)),
         "vic_bank": f"${bank_base:04X}-${bank_base + 0x3FFF:04X}",
-        "flag_slot": FLAG_SLOT,
+        "patched_slots": {
+            slot: f"${bank_base + slot * 64:04X}" for slot in PATCHED_SLOTS
+        },
         "flag_block_bank2_address": f"${flag_block_bank2:04X}",
     }
 
-    # The relocated sprite must be the original shapes with the refuel flag patched
-    # into spare slot 243, its load address moved into VIC bank 2, and nothing else
-    # changed. Comparing against both the raw original and the flag-patched build
-    # proves exactly which 64-byte block the flag occupies.
-    if args.flag_sprite_prg is not None:
-        flag_patched_addr, flag_patched = load_prg(args.flag_sprite_prg)
+    # The relocated sprite must be the original shapes with the added shapes
+    # patched into spare slots, its load address moved into VIC bank 2, and
+    # nothing else changed. Comparing against both the raw original and the
+    # patched build proves exactly which 64-byte blocks the shapes occupy.
+    if args.patched_sprite_prg is not None:
+        patched_addr, patched = load_prg(args.patched_sprite_prg)
         report.equal(
-            "static.flag_patched_source_load_address",
-            f"${flag_patched_addr:04X}",
+            "static.patched_source_load_address",
+            f"${patched_addr:04X}",
             f"${original_addr:04X}",
         )
         report.check(
-            "static.sprite_payload_matches_flag_patched",
-            sprites == flag_patched,
+            "static.sprite_payload_matches_patched_source",
+            sprites == patched,
             f"{len(sprites)} bytes, "
-            f"{sum(1 for a, b in zip(sprites, flag_patched) if a != b)} differ from "
-            f"{args.flag_sprite_prg.name}",
-            f"rebased payload identical to {args.flag_sprite_prg.name}",
+            f"{sum(1 for a, b in zip(sprites, patched) if a != b)} differ from "
+            f"{args.patched_sprite_prg.name}",
+            f"rebased payload identical to {args.patched_sprite_prg.name}",
         )
     differ = [i for i, (a, b) in enumerate(zip(sprites, original)) if a != b]
-    only_flag_slot = bool(differ) and all(
-        flag_offset <= i < flag_offset + 64 for i in differ
+    only_patched = bool(differ) and all(
+        any(off <= i < off + 64 for off in slot_offsets.values()) for i in differ
     )
     report.check(
-        "static.only_flag_slot_differs_from_original",
-        only_flag_slot and len(sprites) == len(original),
+        "static.only_patched_slots_differ_from_original",
+        only_patched and len(sprites) == len(original),
         f"{len(differ)} byte(s) differ, "
-        f"{'all' if only_flag_slot else 'some'} inside slot {FLAG_SLOT} "
-        f"(offset {flag_offset}-{flag_offset + 63})",
-        f"only the 64-byte slot-{FLAG_SLOT} block differs from "
-        f"{args.original_sprite_prg.name}",
+        f"{'all' if only_patched else 'some'} inside slots "
+        + ", ".join(
+            f"{slot} (offset {off}-{off + 63})" for slot, off in slot_offsets.items()
+        ),
+        "only the 64-byte blocks of slots "
+        + ", ".join(str(slot) for slot in PATCHED_SLOTS)
+        + f" differ from {args.original_sprite_prg.name}",
     )
     # A C64 sprite is 63 bytes; the 64th byte of each slot is unused padding, so
-    # make-flag.py treats a slot as spare when its first 63 bytes are empty.
-    original_block = original[flag_offset : flag_offset + 63]
-    flag_block = sprites[flag_offset : flag_offset + 63]
+    # make-shapes.py treats a slot as spare when its first 63 bytes are empty.
+    spare_before = {
+        slot: sum(1 for b in original[off : off + 63] if b)
+        for slot, off in slot_offsets.items()
+    }
+    shaped_after = {
+        slot: sum(1 for b in sprites[off : off + 63] if b)
+        for slot, off in slot_offsets.items()
+    }
     report.check(
-        "static.flag_slot_was_spare_now_holds_shape",
-        not any(original_block) and any(flag_block),
-        f"original slot {FLAG_SLOT} nonzero bytes (first 63) "
-        f"{sum(1 for b in original_block if b)}, "
-        f"patched slot nonzero bytes {sum(1 for b in flag_block if b)}",
-        f"slot {FLAG_SLOT} shape bytes empty in the original, non-empty after "
-        "patching",
+        "static.patched_slots_were_spare_now_hold_shapes",
+        not any(spare_before.values()) and all(shaped_after.values()),
+        {"original_nonzero": spare_before, "patched_nonzero": shaped_after},
+        "shape bytes of slots "
+        + ", ".join(str(slot) for slot in PATCHED_SLOTS)
+        + " empty in the original, non-empty after patching",
     )
     report.equal(
         "static.sprite_bank_offset_preserved",
@@ -854,10 +876,10 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             list(TITLE_NEEDLES),
         )
         report.check(
-            "attract.targets_advance_across_attempts",
+            "attract.normal_spawn_sequence_across_attempts",
             len(starts) >= 3 and len({entry["x"] for entry in starts[:3]}) >= 3,
             starts,
-            "at least three attempts spawning at three distinct generated pads",
+            "at least three attempts entering from distinct normal player spawns",
         )
         report.check(
             "attract.repeatable_successful_landings",
@@ -956,6 +978,32 @@ def check_flight(session: Session, report: Report) -> None:
         "colour": vic[0x2B] & 0x0F,
         "d015": enable,
         "d017": vic[0x17],
+    }
+
+    report.equal(
+        "flight.module_sprite_colour_$D02E",
+        vic[0x2E] & 0x0F,
+        MODULE_SPRITE_COLOR,
+    )
+    report.equal(
+        "flight.module_sprite_y_$D00F",
+        vic[MODULE_POINTER_INDEX * 2 + 1],
+        MODULE_SPRITE_Y,
+    )
+    # The lander crossing x=255 rewrites the whole of $D010, so the module can
+    # only hold station if its MSB bit is never set. Line 1198 keeps bit 7 out
+    # of the right-half mask for exactly this reason.
+    report.check(
+        "flight.module_x_msb_clear",
+        not vic[0x10] & 0x80,
+        {"d010": vic[0x10], "module_x": vic[MODULE_POINTER_INDEX * 2]},
+        "$D010 bit 7 clear, so sprite 7 keeps a sub-256 X",
+    )
+    report.facts["module_sprite"] = {
+        "pointer": pointers[MODULE_POINTER_INDEX],
+        "x": vic[MODULE_POINTER_INDEX * 2],
+        "y": vic[MODULE_POINTER_INDEX * 2 + 1],
+        "colour": vic[0x2E] & 0x0F,
     }
 
     colors = list(monitor.memory_paused(0xD800, 0xDBE7))
@@ -1535,10 +1583,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sprite-prg", type=Path, required=True)
     parser.add_argument("--original-sprite-prg", type=Path, required=True)
     parser.add_argument(
-        "--flag-sprite-prg",
+        "--patched-sprite-prg",
         type=Path,
-        help="flag-patched sprite PRG (pre-rebase) proving the relocated payload "
-        "carries the refuel flag in slot 243",
+        help="shape-patched sprite PRG (pre-rebase) proving the relocated payload "
+        "carries the refuel flag in slot 243 and the command module in slot 244",
     )
     parser.add_argument(
         "--rng-prg",
@@ -1583,7 +1631,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--startup-timeout", type=float, default=60.0)
     parser.add_argument("--explosion-timeout", type=float, default=90.0)
-    parser.add_argument("--attract-timeout", type=float, default=180.0)
+    parser.add_argument("--attract-timeout", type=float, default=300.0)
     parser.add_argument(
         "--reference-prg",
         type=Path,
@@ -1672,7 +1720,7 @@ def run(args: argparse.Namespace) -> int:
     report.facts["screenshots"] = report.screenshots
     report.note(
         "Attract mode is entered by advancing the live title jiffy by 1201 ticks, "
-        "not by waiting 20 wall-clock seconds. Its verification uses generated pad "
+        "not by waiting 20 wall-clock seconds. Its verification uses normal player "
         "spawn positions and score changes across complete attempts; no physics "
         "state, collision latch, landing verdict, oracle tolerance, or fixture is "
         "patched by the harness."

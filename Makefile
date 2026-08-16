@@ -53,7 +53,7 @@ BANK2_CAPACITY_DRIVER := $(TOOLS_DIR)/bank2-capacity.py
 BANK2_CAPACITY_PRG := $(BUILD_DIR)/lunalight-bank2-capacity.prg
 BANK2_CAPACITY_FULL := $(BUILD_DIR)/lunalight-bank2-capacity-full.prg
 BANK2_CAPACITY_REPORT := $(BUILD_DIR)/bank2-capacity.json
-BANK2_RUNTIME_RESERVE ?= 512
+BANK2_RUNTIME_RESERVE ?= 1536
 
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
 # Alternate toolchain bound to the bank-0 source: its memholes and
@@ -68,11 +68,12 @@ MOSPEED_FULL := $(BUILD_DIR)/lunalight-bank0-mospeed-full.prg
 # Sprite shapes for pointers 187-194/203-212/253/254
 SPRITES := sprites/lsprite.prg
 SPRITES_BANK2 := $(BUILD_DIR)/lsprite-bank2.prg
-# Same shapes plus the refuel-pad flag in spare slot 243 (MOSpeed/interpreted alt)
-SPRITES_OUT := $(BUILD_DIR)/lsprite-flag.prg
-# Bank-2 refuel-flag sprite: flag patched into slot 243, then rebased $2E7C->$AE7C
-# so slot 243 lands at VIC-bank-2 $BCC0. Original sprites and make-flag.py unchanged.
-SPRITES_BANK2_FLAG := $(BUILD_DIR)/lsprite-flag-bank2.prg
+# Same shapes plus the refuel-pad flag in spare slot 243 and the orbiting
+# command module in spare slot 244 (MOSpeed/interpreted alt)
+SPRITES_OUT := $(BUILD_DIR)/lsprite-shapes.prg
+# Bank-2 payload: added shapes patched into their spare slots, then rebased
+# $2E7C->$AE7C so slot 243 lands at VIC-bank-2 $BCC0 and slot 244 at $BD00.
+SPRITES_BANK2_SHAPES := $(BUILD_DIR)/lsprite-shapes-bank2.prg
 MUSIC_SRC := $(SRC_DIR)/music.s
 MUSIC_CFG := $(TOOLS_DIR)/music.cfg
 MUSIC_OBJ := $(BUILD_DIR)/music.o
@@ -157,17 +158,17 @@ $(RNG_OBJ): $(RNG_SRC) | $(BUILD_DIR)
 $(RNG_PRG): $(RNG_OBJ) $(RNG_CFG)
 	$(LD65) -C $(RNG_CFG) -o $@ $(RNG_OBJ)
 
-$(SPRITES_OUT): $(SPRITES) $(TOOLS_DIR)/make-flag.py | $(BUILD_DIR)
-	$(PYTHON) $(TOOLS_DIR)/make-flag.py $(SPRITES) $@
+$(SPRITES_OUT): $(SPRITES) $(TOOLS_DIR)/make-shapes.py | $(BUILD_DIR)
+	$(PYTHON) $(TOOLS_DIR)/make-shapes.py $(SPRITES) $@
 
 $(SPRITES_BANK2): $(SPRITES) $(TOOLS_DIR)/rebase-prg-load.py | $(BUILD_DIR)
 	$(PYTHON) $(TOOLS_DIR)/rebase-prg-load.py $(SPRITES) $@ \
 		--from-address 0x2e7c \
 		--to-address 0xae7c
 
-# Flag patched (make-flag) then rebased into VIC bank 2. The flag lands in the
-# original sprite payload's spare slot 243 before the load address changes.
-$(SPRITES_BANK2_FLAG): $(SPRITES_OUT) $(TOOLS_DIR)/rebase-prg-load.py | $(BUILD_DIR)
+# Shapes patched (make-shapes) then rebased into VIC bank 2. They land in the
+# original sprite payload's spare slots before the load address changes.
+$(SPRITES_BANK2_SHAPES): $(SPRITES_OUT) $(TOOLS_DIR)/rebase-prg-load.py | $(BUILD_DIR)
 	$(PYTHON) $(TOOLS_DIR)/rebase-prg-load.py $(SPRITES_OUT) $@ \
 		--from-address 0x2e7c \
 		--to-address 0xae7c
@@ -197,8 +198,8 @@ $(BLITZ_PRG): $(BUILD_DIR)/lunalight.prg $(BLITZ_DISK) $(BLITZ_DRIVER) $(TOOLS_D
 		--c1541 $(C1541)
 
 # Ascending embed order: code, music $4200, RNG $4400-$4BFF, flag sprites $AE7C.
-$(BLITZ_FULL): $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_FLAG) $(TOOLS_DIR)/embed-sprites.py
-	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_FLAG) $@
+$(BLITZ_FULL): $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $@
 
 # Bank-0 fallback: pre-promotion source, original sprites at $2E7C, music $4200.
 blitz-bank0: $(BLITZ_BANK0_FULL)
@@ -268,9 +269,9 @@ verify-bank2: $(BLITZ_FULL) $(BLITZ_BANK0_FULL) $(BANK2_VERIFY_DRIVER) $(TOOLS_D
 		--prg $(BLITZ_FULL) \
 		--code-prg $(BLITZ_PRG) \
 		--reference-prg $(BLITZ_BANK0_FULL) \
-		--sprite-prg $(SPRITES_BANK2_FLAG) \
+		--sprite-prg $(SPRITES_BANK2_SHAPES) \
 		--original-sprite-prg $(SPRITES) \
-		--flag-sprite-prg $(SPRITES_OUT) \
+		--patched-sprite-prg $(SPRITES_OUT) \
 		--music-prg $(MUSIC_PRG) \
 		--rng-prg $(RNG_PRG) \
 		--canonical-source $(SRC_BANK0) \
@@ -287,18 +288,18 @@ verify-bank2: $(BLITZ_FULL) $(BLITZ_BANK0_FULL) $(BANK2_VERIFY_DRIVER) $(TOOLS_D
 # region, keeping a zero-filled runtime workspace for BASIC's variables.
 bank2-capacity: $(BANK2_CAPACITY_FULL)
 
-$(BANK2_CAPACITY_PRG) $(BANK2_CAPACITY_REPORT): $(BLITZ_PRG) $(SPRITES_BANK2_FLAG) $(SPRITES) $(MUSIC_PRG) $(BANK2_CAPACITY_DRIVER)
+$(BANK2_CAPACITY_PRG) $(BANK2_CAPACITY_REPORT): $(BLITZ_PRG) $(SPRITES_BANK2_SHAPES) $(SPRITES) $(MUSIC_PRG) $(BANK2_CAPACITY_DRIVER)
 	$(PYTHON) $(BANK2_CAPACITY_DRIVER) \
 		--code-prg $(BLITZ_PRG) \
-		--sprite-prg $(SPRITES_BANK2_FLAG) \
+		--sprite-prg $(SPRITES_BANK2_SHAPES) \
 		--original-sprite-prg $(SPRITES) \
 		--music-prg $(MUSIC_PRG) \
 		--output $(BANK2_CAPACITY_PRG) \
 		--report $(BANK2_CAPACITY_REPORT) \
 		--reserve-bytes $(BANK2_RUNTIME_RESERVE)
 
-$(BANK2_CAPACITY_FULL): $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_FLAG) $(TOOLS_DIR)/embed-sprites.py
-	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_FLAG) $@
+$(BANK2_CAPACITY_FULL): $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $@
 
 verify-bank2-capacity: $(BANK2_CAPACITY_FULL) $(BANK2_CAPACITY_REPORT) $(BLITZ_BANK0_FULL) $(BANK2_VERIFY_DRIVER) $(BLITZ_GAMEPLAY_BASELINE) $(BLITZ_GAMEPLAY_DRIVER) $(TOOLS_DIR)/vice_monitor.py
 	$(PYTHON) $(BLITZ_GAMEPLAY_DRIVER) \
@@ -315,9 +316,9 @@ verify-bank2-capacity: $(BANK2_CAPACITY_FULL) $(BANK2_CAPACITY_REPORT) $(BLITZ_B
 		--prg $(BANK2_CAPACITY_FULL) \
 		--code-prg $(BANK2_CAPACITY_PRG) \
 		--reference-prg $(BLITZ_BANK0_FULL) \
-		--sprite-prg $(SPRITES_BANK2_FLAG) \
+		--sprite-prg $(SPRITES_BANK2_SHAPES) \
 		--original-sprite-prg $(SPRITES) \
-		--flag-sprite-prg $(SPRITES_OUT) \
+		--patched-sprite-prg $(SPRITES_OUT) \
 		--music-prg $(MUSIC_PRG) \
 		--rng-prg $(RNG_PRG) \
 		--canonical-source $(SRC_BANK0) \

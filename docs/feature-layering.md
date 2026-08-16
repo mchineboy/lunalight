@@ -23,23 +23,26 @@ altered.
 | Bank-0 fallback, with IRQ music (`src/lunalight-bank0.bas`) | 9,670 bytes | `$0801-$2DC4` | `$2E7B` | 183 bytes |
 | Bank-2 relocation only, after the retained optimizations | 9,675 bytes | `$0801-$2DCB` | `$41FF` (music start - 1) | 5,172 bytes |
 | **Canonical promoted build (`src/lunalight.bas`)** | **11,433 bytes** | **`$0801-$34A7`** | **`$41FF`** | **3,416 bytes** |
+| Canonical build with the orbiting command module | 11,585 bytes | `$0801-$3541` | `$41FF` | 3,262 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
 third rows are carried forward from the earlier layering and optimization work and
 were not re-measured, so the derivations below that use the 9,675-byte figure
 inherit that provenance. The canonical row was re-measured with `make blitz` on
-the current working tree, which carries source edits beyond the promotion itself,
-so the delta from the 11,367 bytes recorded at promotion is not attributable to
-any single change.
+the current working tree. Its 66-byte growth over the 11,367 bytes recorded at
+promotion comes from the post-promotion corrections below — the `SYS 16899` stop
+call, two extra cursor-rights on the VEL label, the half-sprite landing offset,
+the attract refuel diversion and thrust gate, and the single-line crash
+post-mortem — so it is not attributable to any one of them.
 
 Derived from those measurements:
 
 - The bank-2 relocation itself cost **5 bytes** (9,675 versus 9,670).
 - All four feature layers together cost **1,758 bytes** (11,433 versus 9,675).
 - Under the old bank-0 layout the promoted code would overrun the `$2E7C` sprite
-  start by **1,516 bytes**, so it cannot exist there. Reported directly by
-  `tools/bank2-capacity.py` as `headroom_under_old_sprite_layout_bytes: -1516`.
+  start by **1,580 bytes**, so it cannot exist there. Reported directly by
+  `tools/bank2-capacity.py` as `old_layout.headroom_bytes: -1580`.
 - The relocation raised the reachable ceiling from `$2E7B` to `$41FF`, a
   **4,996-byte** headroom gain, and **3,416 bytes** remain free above the
   promoted code.
@@ -51,7 +54,7 @@ Derived from those measurements:
 ## Layer results
 
 Each layer's runtime evidence comes from `make verify-bank2` on the canonical
-artifact (`tools/verify-bank2.py`, 83 checks) and from
+artifact (`tools/verify-bank2.py`, 87 checks) and from
 `make verify-blitz-motion` (six-sample oracle at bank-2 addresses against the
 unchanged `tools/fixtures/blitz-gameplay-baseline.json`).
 
@@ -125,10 +128,10 @@ by `landing.generic_pad_verdict_logic`, with the float velocity threshold 5 and
 the tilt and upright-shape gates unchanged.
 
 The refuel flag is the original payload's previously empty slot 243, patched by
-`tools/make-flag.py` and carried through the rebase: only that 64-byte block
-differs from `sprites/lsprite.prg`
-(`static.only_flag_slot_differs_from_original`,
-`static.flag_slot_was_spare_now_holds_shape`), it resolves to `$BCC0`
+`tools/make-shapes.py` and carried through the rebase: only that 64-byte block
+and slot 244's, added later for the command module, differ from
+`sprites/lsprite.prg` (`static.only_patched_slots_differ_from_original`,
+`static.patched_slots_were_spare_now_hold_shapes`), it resolves to `$BCC0`
 (`static.flag_block_maps_to_bank2_address`,
 `runtime.flag_shape_resident_at_$BCC0`), and at runtime it is pointer 4 = 243,
 light blue, unexpanded, enabled in `$D015` (`flight.flag_pointer[4]_at_$87FC`,
@@ -156,6 +159,9 @@ a final input all returned to the title
 (`attract.keyboard_input_returns_to_title`,
 `attract.joystick_input_returns_to_title`,
 `attract.final_input_exit_returns_to_title`).
+
+Those scores are the as-layered figures. The autopilot was reworked afterwards;
+see "Attract mode now plays to win" below.
 
 ## Post-promotion corrections
 
@@ -185,19 +191,26 @@ oracle is unaffected because `pf` is only evaluated at touchdown.
 
 ### Attract mode now plays to win
 
-Four autopilot changes, all behind `IF am`:
+Five autopilot changes, all behind `IF am`:
 
 | Change | Line | Effect |
 | --- | --- | --- |
 | Steering no longer holds the thruster on | 1970-1977 | `jt` carries the fire bit separately, so a rotation frame only burns fuel when descent actually needs braking. Fuel burn is subtracted 1:1 from score at line 754 |
 | Softer touchdown | 1954, 1956 | Target velocity eased from 5/3 to 4/1 in the last 25 and 12 pixels, cutting the `30*ABS(INT(m2))` penalty |
 | Tighter lateral deadband | 1962 | 2 pixels instead of 4, so the craft settles inside the bonus window |
-| Refuel diversion | 1923 | Below 400 fuel the demo targets `rz` when that pad carries `rf()`, instead of cycling into a game over |
+| Random destination without immediate repeats | 1922-1924 | A byte from the RNG table selects one of the five generated pads; an immediate repeat advances to the next pad |
+| Refuel diversion | 1924 | Below 400 fuel the demo targets `rz` when that pad carries `rf()`, instead of cycling into a game over |
 
-Measured across three demo attempts: score 0 → 603 → 1738, no explosions, and a
-centre-bonus message on screen (`attract.lands_on_the_bonus_bullseye`). Before
-these changes the same three-attempt window produced 0 → 573 → 801 and never
-earned a bonus.
+The first correction still cheated visually: line 90 replaced the real spawn
+with `pp=tx:hm=0`, placing the craft directly over the selected pad. That made
+the verified landing reliable but reduced the flight to short vertical braking
+bursts. The override is removed. Attract now enters from the exact normal
+`ep`/`hp` player sequence with its initial horizontal momentum, traverses the
+terrain toward the random destination, and then settles on the bullseye. A
+sample three-attempt runtime run scored 0 → 612 → 1731 with no explosions and a
+centre-bonus message (`attract.lands_on_the_bonus_bullseye`). The verifier pins
+the distinct real-play entries as
+`attract.normal_spawn_sequence_across_attempts`.
 
 ### VEL label column
 
@@ -226,6 +239,49 @@ Removing roughly one percent of per-frame CPU from flight did not move the motio
 oracle: 6 of 6 samples still inside the recorded tolerances. The fixture was
 recorded from the bank-0 fallback, which does have music in flight, so this was
 the change most at risk of drifting and it did not.
+
+## Orbiting command module
+
+A cosmetic spacecraft added to the sky on sprite 7. Measured cost, compiling the
+same tree twice with the original Blitz disk: **69 bytes** (11,587 versus 11,518
+bytes of PRG), leaving 3,262 bytes of headroom below the music player.
+
+The shape needed no new memory. Nine 64-byte slots of the original payload
+(244-252) were still empty after the flag took 243, so `tools/make-shapes.py`
+generalises the former `make-flag.py` to patch a table of slots. Slot 244
+resolves to `$BD00` in bank 2. The load image is still 47,221 bytes and the
+embed layout is unchanged; only 63 zero bytes inside the payload became shape
+data. `static.only_patched_slots_differ_from_original` and
+`static.patched_slots_were_spare_now_hold_shapes` were generalised from their
+flag-only predecessors to assert exactly that for both slots.
+
+Sprite 7 was the only defensible choice of the three sprites free during flight:
+
+- Sprites 5, 6 and 7 carry no flight duty, but all three belong to the explosion
+  cluster, so whichever one is borrowed has to be re-established after a round.
+  Line 1212 does that alongside the flag, which line 720 already refreshes.
+- The flight loop rewrites the whole of `$D010` every time the lander crosses
+  x=255, and the right-half mask `fh=227+fm` set the X-MSB of sprites 5, 6 **and**
+  7. That was harmless only because those sprites were disabled. A module on any
+  of them would jump 256 pixels sideways at each crossing. Sprite 7 is the one
+  whose MSB the crash code already leaves clear (it writes `$D010=96` for the
+  right-hand explosion pair, sprites 5 and 6), so clearing bit 7 for flight as
+  well — `fh=99+fm` — is consistent with the existing explosion geometry rather
+  than a new special case. `flight.module_x_msb_clear` pins it.
+- The resulting sub-256 X limit costs nothing: the HUD occupies columns 34-39,
+  which is sprite X 296 and up, so the module has to stay left of it anyway.
+
+Nothing reads the module. Sprite-sprite collision (`$D01E`) is never consulted,
+and the landing gate at line 630 masks `$D01F` down to bit 0, so an extra sprite
+latching its own background-collision bit changes no verdict. Sprite 7 has the
+lowest display priority, so the lander passes in front of it.
+
+Motion is per-round rather than per-frame, which keeps the hot loop untouched:
+line 91 steps `mx` by 8 and wraps at 240, line 92 writes it, and line 1212
+re-writes pointer, colour, position and the `$D015` bit after the explosion has
+finished with sprite 7. The flight masks became 157 (coast) and 159 (thrust).
+Line 720 could not carry the enable bit because it is one of the landing lines
+held byte-identical to the bank-0 fallback, hence the `peek(v+21)or128` in 1212.
 
 ## Bank-2 layout and register findings
 
@@ -268,15 +324,28 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=512`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code | `$0801-$3467` | 11,367 |
-| Zero-filled runtime workspace for BASIC's variables | `$3468-$3667` | 512 |
-| `0xAA` filler through the ceiling | `$3668-$41FF` | 2,968 |
+| Canonical code, with the command module | `$0801-$354B` | 11,595 |
+| Zero-filled runtime workspace for BASIC's variables | `$354C-$374B` | 512 |
+| `0xAA` filler through the ceiling | `$374C-$41FF` | 2,740 |
 
-The padded artifact passes the motion oracle and the runtime suite, and the
-filler above BASIC's live data reads back byte-intact
-(`capacity.free_filler_intact_above_basic_data`). The `$2E7C-$4073` range the
-sprites used to occupy is therefore genuinely available to code, not merely
-unclaimed on paper.
+The padded artifact passes the motion oracle, and the filler above BASIC's live
+data reads back byte-intact (`capacity.free_filler_intact_above_basic_data`).
+The `$2E7C-$4073` range the sprites used to occupy is therefore genuinely
+available to code, not merely unclaimed on paper.
+
+Three attract checks currently fail on the **padded** artifact only
+(`attract.normal_spawn_sequence_across_attempts`,
+`attract.repeatable_successful_landings`,
+`attract.lands_on_the_bonus_bullseye`): the demo autopilot crashes on its first
+attempt there. Compiling the same tree with the command module reverted
+reproduces the identical three failures, so the cause is the autopilot's margin
+on the padded build, not the module. The unpadded canonical artifact passes all
+three.
+
+One further caveat on this gate: `samples[5].sprites[1].x` failed once by five
+pixels — exactly one frame of horizontal drift — on the padded artifact, then
+passed on two subsequent runs of the same file. The padded configuration sits on
+a frame boundary and is not reliably deterministic.
 
 ## Verification summary
 
@@ -285,9 +354,9 @@ unclaimed on paper.
 | `make verify-baseline` | Exact byte match: `src/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 83 of 83 checks passed |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 83-check suite, 0 failures |
-| `make verify-bank2-capacity` | Padded artifact: 6 of 6 motion samples plus 83 of 83 checks, including `capacity.free_filler_intact_above_basic_data` |
+| `make verify-bank2` (canonical runtime suite) | 87 of 87 checks passed, including `flight.pointer[7]_at_$87FF`, `flight.module_sprite_colour_$D02E`, `flight.module_sprite_y_$D00F` and `flight.module_x_msb_clear` |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 87-check suite, 0 failures |
+| `make verify-bank2-capacity` | Padded artifact: 6 of 6 motion samples plus 87 of 90 checks; the three attract failures reproduce with the command module reverted (see above) |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
 | `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 20 seconds` |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |

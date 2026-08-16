@@ -4,10 +4,12 @@
   30 sys16896:sys17408:gosub1020:sys16899:gosub990
   40 print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
   50 t1$="{rvon}vel {rvof} ":t2$="{rvon}fuel{rvof} ":t3$="{rvon}horz{rvof} ":ep=250:hp=-20:lc=55296
-  60 pn=34808:fe=1000:fu=fe:nm=4:nf=.:n2=25:gosub1100:ifamthengosub1920
+  60 pn=34808:fe=1000:fu=fe:nm=4:nf=.:n2=25:mx=160:gosub1100:ifamthengosub1920
   70 pokev+41,1:pokev+42,6:poke34810,253:poke34811,254
   80 pokev+4,60:pokev+5,60:pokev+6,60:pokev+7,60
-  90 po=28:pp=ep:hm=hp:ifamthenpp=tx:hm=.
+  90 po=28:pp=ep:hm=hp
+  91 mx=mx+8:ifmx>240thenmx=104
+  92 pokev+14,mx
   95 ep=ep-23:ifep=20thenep=250
   100 hp=hp+4:ifhp>25thenhp=-25
   110 e2=.:pokev+39,0:pokev+40,0:pokev+16,fm
@@ -24,9 +26,9 @@
   182 ifp=192thenp=193:goto200
   190 ifz$="{f1}"thenpoke33792,134:poke55296,7:goto1270
   200 iffe=.goto230
-  220 if(jvand16)=.orpeek(653)thenpokev+21,31:q=8:goto240
+  220 if(jvand16)=.orpeek(653)thenpokev+21,159:q=8:goto240
   230 ifq=.thenm2=m2+.6:pokes+4,128:goto330
-  235 q=.:m2=m2+.6:pokev+21,29:pokes+4,128:goto330
+  235 q=.:m2=m2+.6:pokev+21,157:pokes+4,128:goto330
   240 pokes+24,15:pokes+5,128:pokes+6,128:pokes+1,8:pokes,200:pokes+4,129
   245 onp-186goto250,260,280,330,330,330,290,270
   250 m2=m2-.6:fe=fe-1:goto330
@@ -163,9 +165,10 @@
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
   1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
   1197 fx=px(rz)-3:fm=.:iffx>255thenfm=16:fx=fx-256
-  1198 fh=227+fm:fy=py(rz)-7:gosub1210
+  1198 fh=99+fm:fy=py(rz)-7:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
-  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,14:pokev+23,.:pokev+28,.:return
+  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,14:pokev+23,.:pokev+28,.
+  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or128:return
   1270 getz$
   1280 ifz$="{f1}"thenpoke33792,160:poke55296,0:goto200
   1290 ifz$="{f7}"then20
@@ -199,20 +202,29 @@
   1914 cn=(cn+1+peek(162))and15:ifcn>12thencn=cn-13
   1916 restore:forx=.tocn:readq$:next
   1918 xz=.:a$="{yel}"+q$:gosub982:return
-  1920 rem cycle demo pads and spawn nearby; normal terrain metadata is authoritative
-  1922 ak=ak+1:ifak>5thenak=1
-  1923 al=ak:iffe<400thenifrf(rz)thenal=rz
- 1924 tx=px(al)+(pw(al)-3)*4:return
-  1950 rem float autopilot: target m2 and hm, then feed normal controls
+  1920 rem random demo pad from the normal player spawn; avoid immediate repeats
+  1922 gosub900:al=1+int(rv*5/256)
+  1923 ifal=akthenal=al+1:ifal>5thenal=1
+  1924 ak=al:iffe<400thenifrf(rz)thenal=rz
+  1925 tx=px(al)+(pw(al)-3)*4:ap=.:return
+  1950 rem float autopilot: swoop across high, then settle and descend
   1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
-  1952 ag=py(al)-po:av=12:ifag<60thenav=8
- 1954 ifag<25thenav=4
- 1956 ifag<12thenav=1
-  1960 ae=tx-pp:ife2thenae=ae-256
-  1962 aa=abs(ae):ah=.:ifaa>2thenah=1
-  1964 ifaa>12thenah=2
-  1966 ifaa>24thenah=3
-  1968 ifae<.thenah=-ah
+  1952 ae=tx-pp:ife2thenae=ae-256
+  1953 aa=abs(ae):ah=.:ifaa>.thenah=1
+  1954 ifaa>12thenah=2
+  1955 ifaa>24thenah=4
+  1956 ifaa>48thenah=8
+  1957 ifaa>96thenah=12
+  1958 ifae<.thenah=-ah
+  1959 ifapthenifaa<1thenah=.
+  1960 ifapthen1964
+  1961 av=.:ifpo<70thenav=4
+  1962 ifpo>90thenav=-2
+  1963 ifae<=.thenifae>-1thenifhm=.thenap=1
+  1964 ifap=.then1970
+  1965 ag=py(al)-po:av=12:ifag<60thenav=8
+  1966 ifag<25thenav=4
+  1967 ifag<12thenav=1
  1970 jt=16:ifm2>avthenjt=.
  1971 jv=15+jt
  1972 ifhm<ahthenifp<>188thenjv=7+jt:goto170

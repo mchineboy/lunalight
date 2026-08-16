@@ -64,15 +64,16 @@ Added by the promotion (all verified, see below):
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
 | Landing pads | Five generated pads with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge and the lander graphic fills its 24-pixel sprite. Dad's fixed pads carried that half-sprite offset in their hand-tuned windows; the generated ones need it stated |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
-| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-flag.py`](tools/make-flag.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, light blue, unexpanded. The pennant carries an Earth wire-globe emblem |
+| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, light blue, unexpanded. The pennant carries an Earth wire-globe emblem |
+| Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
-| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo that flies the generated pads; any key or joystick input returns to the title. The demo never writes the high score. It plays to win: it aims at the pad centre for the bonus, steers without holding the thruster on, eases to a near-zero touchdown velocity, and diverts to the refuel pad below 400 fuel |
+| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo; any key or joystick input returns to the title. The demo never writes the high score. Each flight uses the same `ep`/`hp` spawn and momentum sequence as real play, selects a random generated pad without immediately repeating one, crosses the terrain, then aims at the pad centre for the bonus. It steers without holding the thruster on, eases to a near-zero touchdown velocity, and diverts to the refuel pad below 400 fuel |
 
-The original sprite payload, [`tools/make-flag.py`](tools/make-flag.py), the
-physics constants, the oracle tolerances and the motion fixture are unchanged by
-the promotion. Only the sprite payload’s **load address** is rebased; its bytes
-are untouched apart from the flag written into the previously empty slot 243.
+The original sprite payload, the physics constants, the oracle tolerances and the
+motion fixture are unchanged by the promotion. Only the sprite payload’s **load
+address** is rebased; its bytes are untouched apart from the flag and command
+module written into the previously empty slots 243 and 244.
 
 ## Controls
 
@@ -203,7 +204,7 @@ CPU-side load image, single `,8,1` load:
 | `$4200`–`$43E5` | Three-voice title soundtrack player; 26 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
-| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243 |
+| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244 |
 
 What the VIC sees in bank 2 (`$8000-$BFFF`):
 
@@ -249,7 +250,7 @@ position drift, not subjective handling.
 | [`tools/verify-bank2.py`](tools/verify-bank2.py) | Canonical layout and runtime suite |
 | [`tools/bank2-capacity.py`](tools/bank2-capacity.py) | Measure bank-2 headroom and emit the padded capacity artifact |
 | [`tools/rebase-prg-load.py`](tools/rebase-prg-load.py) | Change a PRG load address without touching its payload |
-| [`tools/make-flag.py`](tools/make-flag.py) | Write the refuel flag into spare sprite slot 243 |
+| [`tools/make-shapes.py`](tools/make-shapes.py) | Write the refuel flag and command module into spare sprite slots 243 and 244 |
 | [`tools/vice_monitor.py`](tools/vice_monitor.py) | Shared VICE monitor helpers |
 | [`tools/embed-sprites.py`](tools/embed-sprites.py) | Merge PRG + address-sorted asset PRGs |
 | [`tools/attract-sim.py`](tools/attract-sim.py) | Python sim of the attract/terrain path |
