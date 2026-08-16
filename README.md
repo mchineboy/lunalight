@@ -2,227 +2,255 @@
 
 Commodore 64 lunar lander by Steven Hardison (public domain).
 
-Canonical playable source is **`src/lunalight.bas`**, promoted from dad's latest
-BASIC-only working binary [`current/luna081426`](current/luna081426) (`luna2`)
-and then optimized for uncompiled BASIC V2. "BASIC-only" means the program was
-playable without being compiled to machine code.
+Canonical playable path: **`src/lunalight.bas`** compiled with Dad’s original
+**Blitz!** disk [`tools/BLITZ.d64`](tools/BLITZ.d64), producing
+[`build/lunalight-blitz-full.prg`](build/lunalight-blitz-full.prg). Physics remain
+the original float equations from [`current/luna081426`](current/luna081426)
+(`luna2`): unchanged gravity, thrust, drift and landing thresholds.
 
-## Sources
+The canonical package is the **VIC-bank-2 build**. Relocating the screen, sprite
+pointers and sprite shapes out of VIC bank 0 freed the `$2E7C` sprite region for
+code, which is what made the previously omitted feature layers fit. It carries
+IRQ music, the TOD-entropy RNG, procedural terrain with generated landing pads,
+the refuel-pad flag sprite, joystick port 2 with keyboard fallback, the crash
+post-mortem text, and attract mode.
+
+A runnable fallback remains: **`src/lunalight-bank0.bas`** is the exact
+pre-promotion bank-0 source, built by `make blitz-bank0`.
+
+Layer evidence and measured results:
+[`docs/feature-layering.md`](docs/feature-layering.md).
+
+## Lineage
 
 | File | Role |
 | ---- | ---- |
-| [`src/lunalight.bas`](src/lunalight.bas) | **Canonical** game (joystick, procedural terrain, Moon/Mars, fixed-point physics) |
-| [`src/music.s`](src/music.s) | IRQ-driven 6502 soundtrack player and SID voice 2 score |
-| [`src/rng.s`](src/rng.s) | CIA TOD entropy collector and the PRNG table the terrain draws from |
-| [`current/luna081426`](current/luna081426) | Dad's `luna2` tokenized PRG — latest BASIC-only playable baseline |
-| [`current/luna081426-old`](current/luna081426-old) | Earlier `LUNAON4A` tokenized PRG (historical; superseded by `luna2`) |
-| [`current/lsprite`](current/lsprite) / [`sprites/lsprite.prg`](sprites/lsprite.prg) | Sprite shapes at `$2E7C` |
+| [`src/luna081426.bas`](src/luna081426.bas) | Exact detokenized `luna2` baseline; `make verify-baseline` retokenizes to byte-identical [`current/luna081426`](current/luna081426) |
+| [`src/lunalight.bas`](src/lunalight.bas) | **Canonical** promoted bank-2 feature build (formerly `src/lunalight-bank2.bas`, now folded in so only one canonical source exists) |
+| [`src/lunalight-bank0.bas`](src/lunalight-bank0.bas) | **Fallback**: the exact pre-promotion bank-0 canonical source (baseline plus correctness fixes and IRQ music). Also the control the promoted build is verified against |
+| [`src/lunalight-optimized.bas`](src/lunalight-optimized.bas) | Prior evolved source (fixed-point physics, Mars, etc.) — reference only |
+| [`tools/BLITZ.d64`](tools/BLITZ.d64) | **Required tracked input**: original C64 Blitz! compiler disk (`blitz compiler`). Do not modify |
+| [`current/luna081426`](current/luna081426) | Dad’s tokenized PRG — source-of-truth for the baseline round-trip |
+| [`current/luna081426-old`](current/luna081426-old) | Earlier `LUNAON4A` tokenized PRG (historical) |
+| [`sprites/lsprite.prg`](sprites/lsprite.prg) / [`current/lsprite`](current/lsprite) | Original sprite shapes at `$2E7C`; unmodified |
+| [`src/music.s`](src/music.s) | IRQ soundtrack player (embedded at `$4200`) |
+| [`src/rng.s`](src/rng.s) | TOD-entropy collector and PRNG table at `$4400-$4BFF`; **used** by the canonical package for terrain generation |
 | [`src/lunalight-m3x1.bas`](src/lunalight-m3x1.bas) | Reference: 2024 M3X1 rewrite |
 | [`src/lunalight-experimental.bas`](src/lunalight-experimental.bas) | Reference: 2024 LUNAON1 fork |
-| [`src/lunalight-1985.bas`](src/lunalight-1985.bas) | Reference: 1985 LIST decompilation (joystick semantics) |
+| [`src/lunalight-1985.bas`](src/lunalight-1985.bas) | Reference: 1985 LIST decompilation |
 | [`src/LUNALIGH.D64`](src/LUNALIGH.D64) | Historical 1985 disk image |
 
 Source text is lowercase: `petcat` maps lowercase ASCII to PETSCII uppercase.
 
-## What changed vs `luna2`
+## What the canonical build contains
 
-Behaviours kept from the `luna2` baseline:
+Retained from the baseline and required by the motion oracle: float gravity and
+thrust (`m2±.6`, `po` via `.1+m2/20`, `hm/4` drift), soft-landing thresholds
+`|hm|≤2` and `int(m2)≤5`, the ±90° rotation limiter, and the five-pad scoring
+shape. No physics constant or formula was altered by the promotion.
 
-- **Rotation limiter:** tilt stops at 90° either side of upright (sprites `187`–`189` and `193`–`194`). Inverted-thrust handlers for unreachable orientations are omitted.
-- **Soft landing:** horizontal velocity may be in `-2..2` at touchdown; only `|hm| > 2` crashes.
-- **Horizontal wrap:** screen-edge wrap carries the overshoot remainder instead of snapping to a fixed column.
+Retained correctness fixes from the bank-0 lineage: 40-column message-row erasure
+(`bl$`), explosion pointers assigned before the explosion sprites are enabled and
+refreshed before each frame delay, and 9-bit pad X so pads right of x=255
+register.
 
-Additions and optimizations beyond that baseline:
+Added by the promotion (all verified, see below):
 
-- **Explosion:** sprite pointers `203/213/223/233` assigned before enabling explosion sprites; each frame updates pointers before the delay (removes first-frame garbage).
-- **Joystick port 2:** `PEEK(56320)` for tilt (left/right) and fire; keyboard `{rght}`/`{down}` and `PEEK(653)` remain as fallbacks. (`luna2` declared `js` but never read it.)
-- **Hot loop:** physics steps follow jiffy `TI` with catch-up capped at 3; HUD labels drawn once; velocity/fuel/horz digits and colors update only when values change. Hot variables are created first (BASIC scans its variable table linearly) and the VIC registers poked every step are held in pre-computed variables.
-- **HUD:** all three readouts sit in a four-cell field at columns 35–38, right-aligned on column 38, so fuel's four digits no longer overhang the label by a column. Colour bands follow `luna2`: velocity green below 3, yellow up to `sl`, red above; fuel green at 400+, yellow below that, red below 100; horizontal green at zero, yellow inside the ±2 landing tolerance, red beyond it. A screen-code POKE does not touch colour RAM, so the label row and the digit row are recoloured across the whole field — colouring only the field's first cell left it invisible, because that cell is the leading pad space of a right-justified number.
-- **Physics scale:** uncompiled BASIC V2 sustains only about 1.5 physics steps per second, so motion is scaled per *step*, not per jiffy. Velocity stays in tenths; each step moves the lander `m2*ka` pixels (`ka=.03`) and adds `gv` tenths of velocity: Moon `gv=20`/`th=20`, Mars `gv=46`/`th=34`. Horizontal drift moves `hm` pixels per step. Safe touchdown speed is `sl=5` (Moon) / `8` (Mars).
-- **Landing verdict:** velocity is re-read at touchdown instead of reusing the HUD copy, which could be up to three steps stale. Pads right of x=255 now register, since the check adds the sprite X MSB rather than truncating to `pp`.
-- **Message row:** the bonus/points banner on row 8 is blanked with a 40-space string, not `SPC(40)`. On the C64, `SPC` emits cursor-rights and erases nothing, so the old banner survived into the next flight and the lander latched a background collision when it fell through it.
-- **Terrain:** short SID-random mountain segments form stepped ridges and valleys; two high pads, two low pads, and one middle pad are generated once per new game; landing uses pad metadata (`px/pw/py/pb/rf/ph`). (`luna2` used static PRINT art.) Terrain bytes come from the entropy collector in `src/rng.s`, seeded from the CIA TOD phase; see "Where the randomness comes from" below.
-- **Pad colours:** yellow edge cells and green interior, as `luna2` did at line `1790`. Pads here are 3–4 cells rather than a fixed 5, so a 3-cell pad reads yellow-green-yellow.
-- **Refuel flag:** the pad that refills the tanks carries a cyan flag on sprite 4, Y-expanded so its 42-pixel mast stands clear above the lander with the base resting on the pad line. It has to be a sprite, not a character: line 470 latches a crash on any sprite-0 background collision, so a glyph in the row above the pad would destroy the lander on approach. A sprite is safe because only bit 0 of `$D01F` is read and sprite-sprite collision at `$D01E` is never read. The explosion borrows sprites 4–7, so line `1210` re-establishes the flag's pointer, position, colour, Y-expansion and multicolour bit after every landing or crash, and the `$D010` writes carry the flag's X-MSB bit in `fm`/`fh` rather than the old literals `0`/`243`.
-- **Crash post-mortem:** every crash prints a cause line derived from the impact (crater depth scaled by touchdown velocity, cartwheel distance by drift, tilted attitude, or landing off a pad) followed by one of thirteen consequence gags read from `DATA` at 2100. Several riff on Atari Lunar Lander's megabuck-lander, crater, lost-fuel and no-survivor reports without copying its wording. The index comes from the jiffy clock at `$A2`, not SID oscillator 3: the message routine resets the SID for each character's blip, so an `osc3` read at that point is effectively constant and always picked the same gag.
-- **Planets:** title `F5` Moon / `F3` Mars / `F7` start.
-- **Attract mode:** after 20 seconds without input, an autopilot demonstrates the selected planet using normal physics and fuel. It targets a different pad on every attempt, spawns within 56 pixels of it, cruises in a band that clears the tallest ridge until it is aligned, then descends straight down. It aims at the pad's left cell rather than its centre, because the lander sprite is exactly three cells wide and any overhang strikes the neighbouring cell before the pad. Any keyboard or joystick input returns to the title.
-- **Soundtrack:** a PAL/NTSC-adjusted sawtooth melody runs from the KERNAL IRQ on SID voice 2, leaving voice 1 for effects and voice 3 as noise for the entropy collector to mix. Its ~38-second form is a 32-step C-minor theme, a distinct 16-step octave-up bridge with a brighter resonant filter and held peak, then a 32-step reprise. A one-frame gate restart softly articulates each note without the earlier long envelope gaps. Waveform, envelope, filter and master volume are rewritten every frame so the BASIC blip routine (which zeroes all of `$D400-$D418`) can only interrupt the music for one frame.
+| Feature | Implementation |
+| ------- | -------------- |
+| VIC bank 2 | `$DD00` low bits `01`, `poke648,132`, `$D018=$14`; screen `$8400`, pointers `$87F8`, sprites rebased to `$AE7C` |
+| IRQ music | `SYS 16896` installs the player embedded at `$4200-$4385` |
+| RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)` |
+| Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
+| Landing pads | Five generated pads with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3` |
+| Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
+| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-flag.py`](tools/make-flag.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, cyan, Y-expanded |
+| Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
+| Crash post-mortem | One cause line chosen from the crash state (tilt, sideways, velocity, off-pad) plus one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
+| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo that flies the generated pads; any key or joystick input returns to the title. The demo never writes the high score |
+
+The original sprite payload, [`tools/make-flag.py`](tools/make-flag.py), the
+physics constants, the oracle tolerances and the motion fixture are unchanged by
+the promotion. Only the sprite payload’s **load address** is rebased; its bytes
+are untouched apart from the flag written into the previously empty slot 243.
 
 ## Controls
 
 | Input | Action |
 | ----- | ------ |
-| Joystick 2 left/right or `{down}`/`{rght}` | Rotate lander (limited to 90° either side of upright) |
-| Joystick 2 fire or space (`PEEK(653)`) | Thrust |
+| Joystick 2 left / right | Rotate lander (±90° from upright) |
+| Joystick 2 fire | Thrust |
+| `{rght}` / `{down}` | Rotate lander (keyboard fallback) |
+| Shift / Ctrl / C= (`PEEK(653)`) | Thrust (keyboard fallback) |
 | `F1` | Pause / resume |
-| `F5` / `F3` | Select Moon / Mars (title) |
-| `F7` | Start / restart after game over |
-| Any input | Leave attract mode and return to the title |
+| `F7` | Start, and restart after game over |
+| `{home}` while paused | Stop to BASIC (`luna2`) |
+| Any input during attract | Return to the title screen |
 
-## Build / run (VICE)
+## Build / run
+
+Requires `petcat`, `x64sc`, `c1541` (VICE), and `ca65`/`ld65` (cc65). The
+original Blitz compile also needs the tracked disk
+[`tools/BLITZ.d64`](tools/BLITZ.d64).
+
+### Canonical (promoted bank-2, original Blitz!)
 
 ```bash
-make            # build/lunalight-full.prg (BASIC + sprites + music)
-make prg        # tokenized BASIC only
-make run        # x64sc autostart
-make smoke      # warp headless screenshot
-make bench      # normal-speed short run + screenshot
+make                 # build/lunalight-blitz-full.prg
+make blitz           # same
+make blitz-bank2     # alias of the above; the canonical package *is* bank 2
+make run             # x64sc autostart of the canonical full PRG
+make run-bank2       # alias of make run
+make d64             # build/lunalight.d64 — self-contained canonical full PRG as LUNALIGHT
+make d64-boot        # directory listing + headless boot screenshot of that disk
+make smoke           # warp headless title screenshot of the canonical artifact
+make bench           # normal-speed run of the canonical artifact
 make clean
 ```
 
-Plain `.prg` without sprite embed shows garbage lander shapes. Always use `*-full.prg`.
-The full build requires the `ca65` and `ld65` tools from cc65.
+`LOAD"*",8,1` then `RUN` on the D64 (or autostart the full PRG). Sprites, music
+and the RNG are already embedded; do not use the bare `lunalight-blitz.prg` for
+play.
 
-[`tools/make-flag.py`](tools/make-flag.py) patches the refuel-pad flag into spare sprite
-slot 243 (`$3CC0`) of `lsprite.prg` on the way through, leaving the original asset
-untouched. The shape is ASCII art in that file, so it can be redrawn without a sprite editor.
+The canonical load image spans `$0801-$C073`, so a single `,8,1` load moves about
+47 KB over the serial bus — roughly three times the bank-0 fallback. Measured with
+`-warp`: still loading at 110,000,000 cycles, title screen up at 130,000,000.
+`SMOKE_CYCLES` is therefore 135,000,000, which lands inside the title's
+20-second window before attract mode starts, and `BENCH_CYCLES` is 200,000,000 so
+the unwarped run covers the load, the title and normal-speed attract flight (about
+100 s of wall clock, since the SID dump device does not throttle to 100%). Decode
+any screenshot with
+`python3 tools/readscreen.py build/lunalight-blitz-full-smoke.png`.
 
-## Baseline notes
+### Bank-0 fallback
 
-| Metric | `luna2` baseline | Optimized |
-| ------ | ---------------- | --------- |
-| Main loop HUD | Full `{rght}` PRINT chains every iteration | Change-only POKE digits and colour |
-| Landing pads | Five fixed 5-cell pads, yellow edge / green interior | Procedural 3–4 cell pads, same colours, flag on the refuel pad |
-| Input | Keyboard only (`js` unused) | Port 2 + keyboard |
-| Terrain | Static PRINT art | SID-random ridges and high/low pads once per new game |
-| Gravity | Float `.1`/`/20` | Integer tenths; Moon/Mars table; per-step scale |
-| Rotation | ±90° limiter | Same limiter; dead inverted-thrust code removed |
-| Soft landing | `|hm| ≤ 2` | Same tolerance |
-| Horizontal wrap | Overshoot remainder | Same wrap math |
-| Explosion frame 0 | Pointers after sprite enable | Pointers before enable |
-
-`make smoke` reaches the title screen. Gameplay verification uses attract-mode warp runs; `make bench` exercises normal-speed boot.
-
-## Verification tools
-
-| Tool | Use |
-| ---- | --- |
-| [`tools/attract-sim.py`](tools/attract-sim.py) | Replays the terrain generator, physics and pixel-level sprite/background collision in Python, so autopilot and physics changes can be checked over hundreds of landings before spending emulator time |
-| [`tools/readscreen.py`](tools/readscreen.py) | Decodes a VICE screenshot back into C64 text by matching the character ROM, so HUD values can be read exactly instead of eyeballed |
-
-Note that the lander collides with *any* character on screen, so debug text printed
-below row 7 causes false crashes.
-
-## Where the randomness comes from
-
-The generator does not use BASIC V2 `RND`, and it no longer reads SID oscillator
-3 directly. [`src/rng.s`](src/rng.s) collects entropy and fills a 1024-byte
-table that BASIC indexes with a single `PEEK`:
-
-| Address | | |
-| --- | --- | --- |
-| `$4400` / `17408` | `collect` | start the clocks, absorb 32 TOD transitions, then refill |
-| `$4403` / `17411` | `refill` | regenerate the table from the current state |
-| `$4406` / `17414` | `stir` | absorb one cheap sample; called on human input |
-| `$4409` / `17417` | `starttod` | start the TOD alone (diagnostic) |
-| `$4800` / `18432` | `table` | 1024 random bytes |
-
-Line 1072 calls `collect` once when the title is drawn, line 1105 calls `refill`
-and resets the index `ri` before each terrain, and line 1900 is now just
-`rv=peek(rb+ri):ri=ri+1`. A terrain needs at most 654 draws, comfortably inside
-the table, but **that budget is what makes the table size safe** — adding draws
-per column or per cell can push it past 1024 and start reading whatever follows.
-
-The entropy itself is the phase between CIA1's TOD and CIA2 timer B. This
-matters because the TOD pin is clocked from the 50/60Hz mains and everything
-else the machine can read — raster, jiffy clock, SID oscillator 3 — is a
-function of elapsed cycles and so repeats exactly on a cold boot. The mains and
-the system crystal are independent oscillators, which makes their relative phase
-at power-on the only true entropy available. Timer B's two bytes, the raster and
-oscillator 3 are all mixed in at each transition.
-
-Collection blocks for 3.2-3.8 seconds (32 TOD tenths; the spread is because CIA
-control register A bit 7 defaults to expecting 60Hz while a PAL machine supplies
-50Hz), which is why it sits on the title screen. Line 1072 is placed *before*
-line 1075 deliberately: the `F5`/`F3` planet toggles at lines 1080 and 1085 jump
-back to 1075, so switching planets does not re-run the collection.
-
-A proposed Von Neumann debiaser on timer bit 0 was deliberately left out. It
-assumes independent bits with a fixed bias, and the low bit of a free-running
-counter sampled at TOD edges is neither; if the sampling interval were an even
-constant, that bit would never change, every pair would be discarded, and the
-stage would silently contribute nothing. Mixing both whole timer bytes carries
-strictly more information.
-
-Two constraints keep that source alive:
-
-- **Voice 3 must be running before anything reads it.** The noise shift register
-  only advances when the phase accumulator's bit 19 rises, so a zero frequency
-  freezes it. `gosub1850` therefore runs at line 35 *before* the title screen,
-  and the blip routine at line 990 clears voices 1-2, the filter and volume
-  while skipping voice 3's registers (`$D40E-$D414`).
-- **VICE must be told to clock the SID.** Under `-sounddev dummy` VICE never runs
-  the SID, so `PEEK(54299)` returns one frozen byte and the terrain collapses to
-  a single fixed landscape. `smoke` and `bench` use `-sounddev dump`, which needs
-  no audio device; override with `make smoke SOUNDDEV=...` if required.
-
-On real hardware the register advances strictly with elapsed cycles, so attract
-mode reached by the fixed 20-second timeout on a cold boot still produces the
-same opening landscape every time. Human play varies, and attract varies from
-one regeneration to the next within a session.
-
-## BASIC V2 traps this source has already hit
-
-Both of these produced silent, working-but-wrong code rather than an error, so
-they are worth checking before adding anything similar.
-
-**There is no `XOR`.** Line 1182 once read `if((rvxor(c*17+ln*31))and3)=0`, which
-tokenized as `RV OR (...)` because the tokenizer greedily matches the `OR`
-inside the identifier. That demanded both operands have their low two bits clear
-and made the darker terrain speckle roughly 1 cell in 16 instead of 1 in 4. It
-now uses the equivalent that needs no exclusive-or, since `(a xor b) and 3 = 0`
-holds exactly when the low bits match:
-
-```
-1182 ... if(rvand3)=((c*17+ln*31)and3)thenpokepk+bc,td
+```bash
+make blitz-bank0     # build/lunalight-bank0-blitz-full.prg from src/lunalight-bank0.bas
+make run-bank0       # x64sc autostart of the fallback
 ```
 
-**Only the first two characters of a name are significant.** `oc1`, `oc2` and
-`oc3` were all one variable `OC`, which defeated the change-only colour cache at
-lines 532, 552 and 572. They are now `o1`, `o2` and `o3`. Because the old shared
-cache disagreed with all three values almost every frame, it re-poked the colours
-constantly and so accidentally repaired the HUD labels after `gosub1600`
-re-printed them — `PRINT` writes colour RAM too. A correct cache does not repair
-them, so line 135 now invalidates `o1`/`o2`/`o3` after the labels are printed.
+The fallback uses the original sprites at `$2E7C` and music at `$4200`; it has no
+RNG, procedural terrain, flag, joystick, crash text or attract mode. It is also
+the artifact the verifier flies as the bank-0 collision-latch control, and its
+source is the byte-identity control for the shared scoring lines.
 
-The crash consequences at lines 2102-2130 are indexed by `cn`, drawn from the
-jiffy clock because oscillator 3 is deterministic at that point. There are 13
-entries, so line 1714 masks to 0-15 and then wraps with `ifcn>12thencn=cn-13`.
-**Changing the number of entries requires changing that wrap**, or `restore:forx=.tocn:readq$:next`
-will run off the end and raise `?OUT OF DATA` inside the crash report.
+### Verification
 
-## Traps in `src/rng.s`
+```bash
+make verify-baseline        # petcat round-trip of src/luna081426.bas ↔ current/luna081426
+make verify-blitz-motion    # canonical bank-2 motion oracle vs the original fixture
+make verify-bank2-motion    # same target under its bank-2 name
+make verify-blitz-gameplay  # canonical aggregate: motion oracle + full runtime suite
+make verify-bank2           # the runtime suite alone
+make verify-bank2-capacity  # capacity artifact: motion oracle + suite + filler integrity
+make verify-bank0-motion    # motion oracle against the bank-0 fallback
+make record-blitz-baseline  # explicit fixture mutation only — do not run casually
+```
 
-**The 6526 TOD does not run until you start it.** Writing the hours register
-halts the clock and only a write to the tenths register restarts it. Nothing in
-the KERNAL starts CIA1's TOD, so it reads a constant 0 forever and a naive
-`wait for the tenths register to change` loop hangs the machine. `starttod`
-clears control register B bit 7 to address the clock rather than the alarm, then
-writes hours, minutes, seconds and tenths, in that order, with tenths last.
+`verify-blitz-motion` reads the relocated screen (`$8400`) and pointer table
+(`$87F8`) and compares the promoted artifact against the **unchanged** bank-0
+motion fixture within its recorded tolerances.
+`record-blitz-baseline` is bound to the bank-0 fallback at bank-0 addresses,
+because the fixture describes that lineage.
 
-**`xorshift` clobbers Y.** `refill` originally carried its byte index in Y
-across the call, so every iteration stored to offset 0 and the loop never
-terminated. Both loop counters now live in memory rather than in registers.
-Nothing here is fast enough for register pressure to be worth a hidden contract
-between routines.
+The verifier’s `--mode strict` additionally requires the whole decoded screen to
+match the fixture. That only ever described the bank-0 static-terrain screen, so
+it is not a canonical gate: the promoted build draws procedural terrain that
+differs every game by design. The canonical aggregate replaces it.
 
-## Memory map
+VICE-driven targets own the emulator and its monitor port, so the Makefile
+declares `.NOTPARALLEL`; do not run them with `make -j`.
 
-Space is tight: BASIC must end before the sprite data at `$2E7C`. The build
-prints the end address, and `tools/embed-sprites.py` fails the build on overlap.
+### Alternate toolchains (bank-0 lineage, explicit names)
+
+These paths embed or patch assets at the bank-0 addresses (`$2E7C` sprites), so
+they are bound to `src/lunalight-bank0.bas`. They are **not** bank-2 capable and
+claim no parity with the canonical package.
+
+| Target | Output | Notes |
+| ------ | ------ | ----- |
+| `make prg` | `build/lunalight.prg`, `build/lunalight-bank0.prg` | Tokenized BASIC for both lineages |
+| `make full` | `build/lunalight-bank0-full.prg` | Interpreted BASIC + flag sprites + music + RNG embed, bank-0 layout |
+| `make run-basic` | — | Autostart the interpreted bank-0 full PRG |
+| `make mospeed` | `build/lunalight-bank0-mospeed-full.prg` | MOSpeed cross-compile of the bank-0 source + asset patch |
+| `make run-mospeed` | — | Autostart the MOSpeed bank-0 full PRG |
+| `make d64-mospeed` | `build/lunalight-bank0-mospeed.d64` | Former default disk: MOSpeed PRG + `.bas` + `music` + `rng` |
+| `make reblitz` | `build/lunalight-bank0-reblitz.prg` | **Experimental** JS Reblitz64 port of the bank-0 source; overruns sprites; not packaged |
+
+MOSpeed needs Java and downloads `tools/mospeed/basicv2.jar` on first use.
+Reblitz needs a local `tools/reblitz64` checkout (gitignored).
+
+### Compiler distinctions
+
+| Compiler | What it is | Role here |
+| -------- | ---------- | --------- |
+| **Original Blitz!** (`tools/BLITZ.d64`) | C64 Blitz!/Austro-Speed run under VICE via [`tools/blitz-compile.py`](tools/blitz-compile.py) | **Canonical** playable binary |
+| **Reblitz64** | Host-side JS reimplementation | Experimental only; not Dad’s compiler |
+| **MOSpeed** | Java 6502 BASIC V2 cross-compiler | Alternate; different codegen and packaging |
+| **Interpreted BASIC V2** | `petcat` tokenize + embed | Slow; useful for source debugging |
+
+## Memory map (canonical bank-2 package)
+
+CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`-`$2DD2` | BASIC program |
-| `$2E7C`-`$4073` | sprite shapes |
-| `$4200`-`$4385` | soundtrack player |
-| `$4400`-`$4BFF` | entropy collector and its 1024-byte table |
-| `$4C00`- | BASIC variables and arrays |
+| `$0801`–`$3467` | Blitz machine code (11,367 bytes for the promoted source) |
+| `$3468`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,480 bytes of headroom to the music player |
+| `$4200`–`$4385` | IRQ soundtrack player |
+| `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
+| `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
+| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243 |
 
-Note the last row: `LOAD",8,1"` sets the start of variable space to the end of
-the *loaded image*, not the end of the BASIC text, which is what keeps variables
-from overwriting the sprites. That also rules out putting code at `$C000` — the
-single-blob load would have to pad the image out to there, pushing variables to
-`$D000` and colliding with the string area descending from `$A000`. New assets
-have to sit immediately above the existing ones.
+What the VIC sees in bank 2 (`$8000-$BFFF`):
+
+| Range | Contents |
+| --- | --- |
+| `$8400`–`$87E7` | Screen matrix (`poke648,132`, `$D018=$14`) |
+| `$87F8`–`$87FF` | Sprite pointers |
+| `$9000`–`$97FF` | Character ROM image. `$D018` must select this; `$18` selects blank RAM at `$A000`, which makes the display invisible and prevents the sprite/background collision latch that gates landing |
+| `$AEC0`–`$B0BF` | Lander shapes, pointers 187-194 |
+| `$B2C0`–`$BCBF` | Explosion shapes, pointers 203-242 |
+| `$BCC0`–`$BCFF` | Refuel flag, pointer slot 243 |
+| `$BF40`–`$BFBF` | Decoration shapes, pointers 253 and 254 |
+
+`$D018` reads back as `$15` because bit 0 is unused. The sprite payload’s tail
+runs past `$C000`, outside the bank; every pointer the game actually uses
+(187-194, 203-242, 243, 253, 254) resolves below `$BFFF`, which the verifier
+checks. `tools/embed-sprites.py` fails the build if segments would overlap.
+
+The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
+`$2E7C-$4073`, music `$4200-$4385`, screen `$0400`, pointers `$07F8`.
+
+## Verification workflow
+
+1. `make verify-baseline` — exact tokenized match for the frozen `luna081426` text.
+2. `make` / `make blitz` — original compiler disk → `lunalight-blitz.prg` → embed music, RNG and rebased flag sprites → `lunalight-blitz-full.prg`.
+3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, crash cause and consequence text, attract mode with repeatable autopilot landings, and a bank-0 control descent).
+4. `make verify-bank2-capacity` — proves the freed region is genuinely usable: the padded artifact still passes the motion oracle and the suite, and the filler above BASIC’s live data is byte-intact.
+5. `make smoke` / `make bench` — title screenshots of the canonical artifact.
+6. `make d64` / `make d64-boot` — package `build/lunalight.d64` (one 186-block `lunalight` PRG, 478 blocks free) and boot it headless; the exit screenshot decodes to the title screen.
+
+Measured results for each layer are in
+[`docs/feature-layering.md`](docs/feature-layering.md).
+
+Gameplay “feel” still wants Dad’s confirmation; the oracle catches timing and
+position drift, not subjective handling.
+
+## Tools
+
+| Tool | Use |
+| ---- | --- |
+| [`tools/blitz-compile.py`](tools/blitz-compile.py) | Drive original Blitz! under VICE binary monitor |
+| [`tools/verify-blitz-gameplay.py`](tools/verify-blitz-gameplay.py) | Record/compare Blitz gameplay traces (motion and strict modes) |
+| [`tools/verify-bank2.py`](tools/verify-bank2.py) | Canonical layout and runtime suite |
+| [`tools/bank2-capacity.py`](tools/bank2-capacity.py) | Measure bank-2 headroom and emit the padded capacity artifact |
+| [`tools/rebase-prg-load.py`](tools/rebase-prg-load.py) | Change a PRG load address without touching its payload |
+| [`tools/make-flag.py`](tools/make-flag.py) | Write the refuel flag into spare sprite slot 243 |
+| [`tools/vice_monitor.py`](tools/vice_monitor.py) | Shared VICE monitor helpers |
+| [`tools/embed-sprites.py`](tools/embed-sprites.py) | Merge PRG + address-sorted asset PRGs |
+| [`tools/attract-sim.py`](tools/attract-sim.py) | Python sim of the attract/terrain path |
+| [`tools/readscreen.py`](tools/readscreen.py) | Decode VICE screenshots via character ROM |
+
+Note: the lander collides with any character on screen; debug text below row 7
+causes false crashes.

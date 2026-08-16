@@ -5,3 +5,4 @@ pkg/
 bin/
 tools/mospeed/basicv2.jar
 tools/reblitz64/
+__pycache__/

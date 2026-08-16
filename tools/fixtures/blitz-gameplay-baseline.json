@@ -1,0 +1,503 @@
+{
+  "schema": 1,
+  "profile": {
+    "machine": "C64SC",
+    "vice_seed": 1,
+    "sound_device": "dummy",
+    "artifact": "build/lunalight-blitz-full.prg",
+    "artifact_sha256": "288d5a3e323b4a50b8cea26e5af00fc9cfb2a016cfcdb842b6cab999fb46d6e5",
+    "sprite_embed_address": "0x2e7c"
+  },
+  "synchronization": {
+    "title": [
+      "l u n a l i g h t",
+      "press f7 to start"
+    ],
+    "flight": [
+      "vel",
+      "fuel",
+      "horz"
+    ],
+    "flight_instruction_anchor": "first-store:$d000-after-f7",
+    "jiffy_epoch_reset": true
+  },
+  "events": [
+    {
+      "jiffy": 25,
+      "input": "cursor-right",
+      "petscii": 29
+    }
+  ],
+  "tolerances": {
+    "sample_jiffy": 0,
+    "sprite_x": 1,
+    "sprite_y": 1,
+    "hud.vel": 1,
+    "hud.horz": 1,
+    "hud.fuel": 0
+  },
+  "samples": [
+    {
+      "requested_jiffy": 10,
+      "sample_jiffy": 10,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 240,
+          "y": 30
+        },
+        {
+          "index": 1,
+          "x": 240,
+          "y": 30
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        187,
+        187,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 26,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   26",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    },
+    {
+      "requested_jiffy": 20,
+      "sample_jiffy": 20,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 235,
+          "y": 32
+        },
+        {
+          "index": 1,
+          "x": 235,
+          "y": 32
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        187,
+        187,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 26,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   26",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    },
+    {
+      "requested_jiffy": 30,
+      "sample_jiffy": 30,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 225,
+          "y": 35
+        },
+        {
+          "index": 1,
+          "x": 225,
+          "y": 35
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        188,
+        188,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 28,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   28",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    },
+    {
+      "requested_jiffy": 40,
+      "sample_jiffy": 40,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 220,
+          "y": 36
+        },
+        {
+          "index": 1,
+          "x": 220,
+          "y": 36
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        188,
+        188,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 28,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   28",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    },
+    {
+      "requested_jiffy": 50,
+      "sample_jiffy": 50,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 210,
+          "y": 39
+        },
+        {
+          "index": 1,
+          "x": 210,
+          "y": 39
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        188,
+        188,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 29,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   29",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    },
+    {
+      "requested_jiffy": 70,
+      "sample_jiffy": 70,
+      "sprites": [
+        {
+          "index": 0,
+          "x": 195,
+          "y": 44
+        },
+        {
+          "index": 1,
+          "x": 195,
+          "y": 44
+        },
+        {
+          "index": 2,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 3,
+          "x": 60,
+          "y": 60
+        },
+        {
+          "index": 4,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 5,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 6,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "index": 7,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "vic": {
+        "x_msb": 0,
+        "enabled": 13,
+        "expanded_y": 0,
+        "sprite_sprite_collision": 12,
+        "sprite_background_collision": 0
+      },
+      "sprite_pointers": [
+        188,
+        188,
+        253,
+        254,
+        255,
+        255,
+        0,
+        0
+      ],
+      "hud": {
+        "vel": 31,
+        "fuel": 1000,
+        "horz": -20
+      },
+      "screen_rows": {
+        "2": "                                   vel",
+        "3": "                                   31",
+        "4": "                                   fuel",
+        "5": "                                   1000",
+        "6": "                                   horz",
+        "7": "                                  -20",
+        "24": " hi 0            score 0         4 lems"
+      }
+    }
+  ]
+}
