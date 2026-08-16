@@ -10,10 +10,10 @@ the original float equations from [`current/luna081426`](current/luna081426)
 
 The canonical package is the **VIC-bank-2 build**. Relocating the screen, sprite
 pointers and sprite shapes out of VIC bank 0 freed the `$2E7C` sprite region for
-code, which is what made the previously omitted feature layers fit. It carries
-IRQ music, the TOD-entropy RNG, procedural terrain with generated landing pads,
-the refuel-pad flag sprite, joystick port 2 with keyboard fallback, the crash
-post-mortem text, and attract mode.
+code, which is what made the previously omitted feature layers fit. It carries a
+three-voice title soundtrack, the TOD-entropy RNG, procedural terrain with
+generated landing pads, the refuel-pad flag sprite, joystick port 2 with keyboard
+fallback, the crash post-mortem text, and attract mode.
 
 A runnable fallback remains: **`src/lunalight-bank0.bas`** is the exact
 pre-promotion bank-0 source, built by `make blitz-bank0`.
@@ -33,7 +33,7 @@ Layer evidence and measured results:
 | [`current/luna081426`](current/luna081426) | Dad’s tokenized PRG — source-of-truth for the baseline round-trip |
 | [`current/luna081426-old`](current/luna081426-old) | Earlier `LUNAON4A` tokenized PRG (historical) |
 | [`sprites/lsprite.prg`](sprites/lsprite.prg) / [`current/lsprite`](current/lsprite) | Original sprite shapes at `$2E7C`; unmodified |
-| [`src/music.s`](src/music.s) | IRQ soundtrack player (embedded at `$4200`) |
+| [`src/music.s`](src/music.s) | Three-voice IRQ title soundtrack (embedded at `$4200`) |
 | [`src/rng.s`](src/rng.s) | TOD-entropy collector and PRNG table at `$4400-$4BFF`; **used** by the canonical package for terrain generation |
 | [`src/lunalight-m3x1.bas`](src/lunalight-m3x1.bas) | Reference: 2024 M3X1 rewrite |
 | [`src/lunalight-experimental.bas`](src/lunalight-experimental.bas) | Reference: 2024 LUNAON1 fork |
@@ -59,15 +59,15 @@ Added by the promotion (all verified, see below):
 | Feature | Implementation |
 | ------- | -------------- |
 | VIC bank 2 | `$DD00` low bits `01`, `poke648,132`, `$D018=$14`; screen `$8400`, pointers `$87F8`, sprites rebased to `$AE7C` |
-| IRQ music | `SYS 16896` installs the player embedded at `$4200-$4385` |
+| Title soundtrack | Three voices: triangle bass on the chord root, sawtooth melody under a low-pass cutoff sweep, and a pulse echo of the melody four steps back. `SYS 16896` installs the player embedded at `$4200-$43E5`; `SYS 16899` restores the KERNAL IRQ and silences the SID, so flight and attract run without music and leave the chip to the engine and explosion effects |
 | RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)` |
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
-| Landing pads | Five generated pads with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3` |
+| Landing pads | Five generated pads with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge and the lander graphic fills its 24-pixel sprite. Dad's fixed pads carried that half-sprite offset in their hand-tuned windows; the generated ones need it stated |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
-| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-flag.py`](tools/make-flag.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, cyan, Y-expanded |
+| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-flag.py`](tools/make-flag.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, light blue, unexpanded. The pennant carries an Earth wire-globe emblem |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
-| Crash post-mortem | One cause line chosen from the crash state (tilt, sideways, velocity, off-pad) plus one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
-| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo that flies the generated pads; any key or joystick input returns to the title. The demo never writes the high score |
+| Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
+| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo that flies the generated pads; any key or joystick input returns to the title. The demo never writes the high score. It plays to win: it aims at the pad centre for the bonus, steers without holding the thruster on, eases to a near-zero touchdown velocity, and diverts to the refuel pad below 400 fuel |
 
 The original sprite payload, [`tools/make-flag.py`](tools/make-flag.py), the
 physics constants, the oracle tolerances and the motion fixture are unchanged by
@@ -132,7 +132,10 @@ make run-bank0       # x64sc autostart of the fallback
 The fallback uses the original sprites at `$2E7C` and music at `$4200`; it has no
 RNG, procedural terrain, flag, joystick, crash text or attract mode. It is also
 the artifact the verifier flies as the bank-0 collision-latch control, and its
-source is the byte-identity control for the shared scoring lines.
+source is the byte-identity control for the shared scoring lines. It predates the
+title-only soundtrack, so it never calls `SYS 16899` and its music plays through
+flight; the player restores its own envelopes on each note step, so the in-game
+SID clear at line 990 costs it one step of tone rather than silencing it.
 
 ### Verification
 
@@ -195,9 +198,9 @@ CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`–`$3467` | Blitz machine code (11,367 bytes for the promoted source) |
-| `$3468`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,480 bytes of headroom to the music player |
-| `$4200`–`$4385` | IRQ soundtrack player |
+| `$0801`–`$34A7` | Blitz machine code (11,431 bytes for the promoted source) |
+| `$34A8`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,416 bytes of headroom to the music player |
+| `$4200`–`$43E5` | Three-voice title soundtrack player; 26 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
 | `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243 |
@@ -220,13 +223,13 @@ runs past `$C000`, outside the bank; every pointer the game actually uses
 checks. `tools/embed-sprites.py` fails the build if segments would overlap.
 
 The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
-`$2E7C-$4073`, music `$4200-$4385`, screen `$0400`, pointers `$07F8`.
+`$2E7C-$4073`, music `$4200-$43E5`, screen `$0400`, pointers `$07F8`.
 
 ## Verification workflow
 
 1. `make verify-baseline` — exact tokenized match for the frozen `luna081426` text.
 2. `make` / `make blitz` — original compiler disk → `lunalight-blitz.prg` → embed music, RNG and rebased flag sprites → `lunalight-blitz-full.prg`.
-3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, crash cause and consequence text, attract mode with repeatable autopilot landings, and a bank-0 control descent).
+3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, the single-line crash post-mortem, attract mode with repeatable autopilot landings, and a bank-0 control descent).
 4. `make verify-bank2-capacity` — proves the freed region is genuinely usable: the padded artifact still passes the motion oracle and the suite, and the filler above BASIC’s live data is byte-intact.
 5. `make smoke` / `make bench` — title screenshots of the canonical artifact.
 6. `make d64` / `make d64-boot` — package `build/lunalight.d64` (one 186-block `lunalight` PRG, 478 blocks free) and boot it headless; the exit screenshot decodes to the title screen.

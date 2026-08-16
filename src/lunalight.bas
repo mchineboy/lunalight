@@ -1,7 +1,7 @@
   10 rem save"luna081426",8,1
   20 clr:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
   25 dimpx(5),pw(5),py(5),pb(5),rf(5),ph(5),h(39)
-  30 sys16896:sys17408:gosub1020:gosub990
+  30 sys16896:sys17408:gosub1020:sys16899:gosub990
   40 print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
   50 t1$="{rvon}vel {rvof} ":t2$="{rvon}fuel{rvof} ":t3$="{rvon}horz{rvof} ":ep=250:hp=-20:lc=55296
   60 pn=34808:fe=1000:fu=fe:nm=4:nf=.:n2=25:gosub1100:ifamthengosub1920
@@ -52,7 +52,7 @@
   500 ifm2<3thenprint"{grn}";:goto530
   510 print"{yel}";
   515 ifm2>5thenprint"{red}";
-  530 print"{home}{down}{down}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}"t1$
+  530 print"{home}{down}{down}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}"t1$
   531 print"{home}{down}{down}{down}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}{rght}"int(m2);c$
   535 iffe<1thenfe=.
   540 iffe>399thenprint"{grn}";:goto570
@@ -73,7 +73,7 @@
   641 ifhm<-2goto1320
   642 ifp<>187goto1320
   644 ifint(m2)>5goto1320
-  649 pf=int(pp):ife2thenpf=pf+256
+  649 pf=int(pp)+12:ife2thenpf=pf+256
   650 lz=.:fori=1to5
   660 ifpf<px(i)orpf>=px(i)+pw(i)*8then690
   670 ifabs(po-py(i))>4then690
@@ -163,9 +163,9 @@
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
   1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
   1197 fx=px(rz)-3:fm=.:iffx>255thenfm=16:fx=fx-256
-  1198 fh=227+fm:fy=py(rz)-27:gosub1210
+  1198 fh=227+fm:fy=py(rz)-7:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
-  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,3:pokev+23,16:pokev+28,.:return
+  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,14:pokev+23,.:pokev+28,.:return
   1270 getz$
   1280 ifz$="{f1}"thenpoke33792,160:poke55296,0:goto200
   1290 ifz$="{f7}"then20
@@ -187,36 +187,40 @@
   1510 poke214,23:print:print"{rvon}{lblu} hi";hs;tab(17);"score";pt;:printtab(32);nm;"lems";
   1515 ifamthenprint"{home}{rvon}{lblu} attract "
   1520 return
-  1900 rem crash post-mortem: cause line, then a rotating consequence
-  1902 cr=.:cv=abs(int(m2)):ch=abs(hm)
+  1900 rem crash post-mortem: exactly one line, cause or consequence, by rng
+  1902 cr=.:gosub900:ifrv<128goto1914
+  1903 cv=abs(int(m2)):ch=abs(hm)
   1904 a$="{red}you rearranged the landscape"
   1906 ifxzthena$="{red}boulders are not landing pads"
   1908 ifch>2thena$="{red}you cartwheeled"+str$(ch*7)+" feet"
   1910 ifp<>187thena$="{red}lems do not land sideways"
   1912 ifcv>5thena$="{red}new crater"+str$(cv*3)+" feet deep"
-  1914 xz=.:gosub982:cn=(cn+1+peek(162))and15:ifcn>12thencn=cn-13
+  1913 xz=.:gosub982:return
+  1914 cn=(cn+1+peek(162))and15:ifcn>12thencn=cn-13
   1916 restore:forx=.tocn:readq$:next
-  1918 a$="{yel}"+q$:gosub982:return
+  1918 xz=.:a$="{yel}"+q$:gosub982:return
   1920 rem cycle demo pads and spawn nearby; normal terrain metadata is authoritative
   1922 ak=ak+1:ifak>5thenak=1
-  1924 al=ak:tx=px(al)+(pw(al)-3)*4:return
+  1923 al=ak:iffe<400thenifrf(rz)thenal=rz
+ 1924 tx=px(al)+(pw(al)-3)*4:return
   1950 rem float autopilot: target m2 and hm, then feed normal controls
   1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
   1952 ag=py(al)-po:av=12:ifag<60thenav=8
-  1954 ifag<25thenav=5
-  1956 ifag<10thenav=3
+ 1954 ifag<25thenav=4
+ 1956 ifag<12thenav=1
   1960 ae=tx-pp:ife2thenae=ae-256
-  1962 aa=abs(ae):ah=.:ifaa>4thenah=1
+  1962 aa=abs(ae):ah=.:ifaa>2thenah=1
   1964 ifaa>12thenah=2
   1966 ifaa>24thenah=3
   1968 ifae<.thenah=-ah
-  1970 jv=31:ifm2>avthenjv=15
-  1972 ifhm<ahthenifp<>188thenjv=7:goto170
-  1973 ifhm<ahthenjv=15:goto170
-  1974 ifhm>ahthenifp<>194thenjv=11:goto170
-  1975 ifhm>ahthenjv=15:goto170
-  1976 ifp=188orp=189thenjv=11:goto170
-  1977 ifp<>187thenjv=7
+ 1970 jt=16:ifm2>avthenjt=.
+ 1971 jv=15+jt
+ 1972 ifhm<ahthenifp<>188thenjv=7+jt:goto170
+ 1973 ifhm<ahthenjv=15:goto170
+ 1974 ifhm>ahthenifp<>194thenjv=11+jt:goto170
+ 1975 ifhm>ahthenjv=15:goto170
+ 1976 ifp=188orp=189thenjv=11+jt:goto170
+ 1977 ifp<>187thenjv=7+jt
   1978 goto170
   1980 ifz$="{rght}"thenjv=(jvand16)+7
   1982 ifz$="{down}"thenjv=(jvand16)+11

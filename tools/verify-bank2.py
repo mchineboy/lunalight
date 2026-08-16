@@ -42,12 +42,20 @@ TERRAIN_TILE = 160
 PAD_SURFACE_TILE = 100
 PAD_BODY_COLOR = 5
 PAD_EDGE_COLOR = 7
-# The refuel flag lives on sprite 4, pointer slot 243, coloured cyan (3) and
-# Y-expanded. Its shape is patched into the spare sprite slot 243 whose VIC-bank-2
-# address is $BCC0.
+# The refuel flag lives on sprite 4, pointer slot 243, coloured light blue (14)
+# and unexpanded. Its shape is patched into the spare sprite slot 243 whose
+# VIC-bank-2 address is $BCC0.
+# The soundtrack belongs to the title screen alone. SYS 16896 points $0314 at
+# the player loaded at $4200; SYS 16899 restores the KERNAL vector, so flight
+# and attract mode leave the SID to the engine and explosion effects.
+MUSIC_START = 0x4200
+MUSIC_END = 0x4400
+# The lander graphic fills its 24-pixel sprite, so its centre sits half a sprite
+# right of the $D000 value the landing verdict reads.
+SPRITE_CENTRE_OFFSET = 12
 FLAG_SLOT = 243
 FLAG_POINTER_INDEX = 4
-FLAG_SPRITE_COLOR = 3
+FLAG_SPRITE_COLOR = 14
 FLIGHT_POINTERS = {2: 253, 3: 254}
 EXPLOSION_POINTER_RANGE = (203, 242)
 # $D015 enable masks the flight loop writes: coast keeps the lander, the two
@@ -71,8 +79,9 @@ LANDING_LINES = (
 # marker as a prefix; the bank-0 statement it precedes still has to match
 # byte for byte, so the landing decision itself remains unchanged.
 LANDING_LINE_PREFIXES = {700: "xz=1:"}
-# Crash post-mortem strings: one cause line chosen from the crash state, then
-# one consequence read from the DATA table.
+# Crash post-mortem strings. Each crash prints exactly one line: either a cause
+# chosen from the crash state or a consequence read from the DATA table, picked
+# by a coin flip off the RNG table, so a single descent can only show one tier.
 CRASH_CAUSES = (
     "you rearranged the landscape",
     "boulders are not landing pads",
@@ -390,6 +399,11 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
     py altitude window, award pb() points, mark off-pad crashes, and refuel from
     the rf() metadata. Scoring lines that are physics-shared with the bank-0
     fallback source are held byte-identical against it.
+
+    px() is the sprite-X of a pad's left edge, so the verdict has to compare the
+    lander's centre rather than its left edge. Line 649 therefore carries the
+    half-sprite offset; without it the generated windows sit 12 pixels right of
+    the craft and the centre bonus at line 740 is unreachable.
     """
     variant = source_lines(args.bank2_source)
 
@@ -397,7 +411,7 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
     required = {
         642: "ifp<>187goto1320",
         644: "ifint(m2)>5goto1320",
-        649: "pf=int(pp):ife2thenpf=pf+256",
+        649: f"pf=int(pp)+{SPRITE_CENTRE_OFFSET}:ife2thenpf=pf+256",
         650: "fori=1to5",
         660: "ifpf<px(i)orpf>=px(i)+pw(i)*8then690",
         670: "ifabs(po-py(i))>4then690",
@@ -659,6 +673,13 @@ def check_rendered_pixels(session: Session, report: Report, phase: str) -> None:
     )
 
 
+def music_irq_installed(session: Session) -> tuple[bool, str]:
+    assert session.monitor is not None
+    raw = session.monitor.memory_paused(0x0314, 0x0315)
+    vector = raw[0] | raw[1] << 8
+    return MUSIC_START <= vector < MUSIC_END, f"${vector:04X}"
+
+
 def check_title(session: Session, report: Report) -> None:
     screen = session.wait_for_screen(TITLE_NEEDLES, session.args.startup_timeout)
     if session.args.patch_d018 is not None:
@@ -681,6 +702,13 @@ def check_title(session: Session, report: Report) -> None:
             [line for line in screen if line.strip()],
             needle,
         )
+    installed, vector = music_irq_installed(session)
+    report.check(
+        "title.music_irq_installed",
+        installed,
+        {"irq_vector": vector},
+        f"$0314 inside the music player ${MUSIC_START:04X}-${MUSIC_END - 1:04X}",
+    )
     check_registers(session, report, "title")
     check_character_source(session, report)
     check_rendered_pixels(session, report, "title")
@@ -730,6 +758,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
     starts: list[dict[str, int]] = []
     successes = 0
     explosions = 0
+    bonus_seen = False
     highs: set[int] = set()
     try:
         monitor.set_joyport(1, 0x1F)
@@ -748,6 +777,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
 
         flight = trigger_attract(session)
         session.snapshot("flight")
+        demo_music_installed, demo_vector = music_irq_installed(session)
         high, score, lems = status_values(flight)
         if high is not None:
             highs.add(high)
@@ -766,6 +796,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             high, score, lems = status_values(screen)
             if high is not None:
                 highs.add(high)
+            bonus_seen = bonus_seen or any("bonus" in line for line in screen)
             if vic[0x15] == 252 and not attempt_exploded:
                 attempt_exploded = True
                 explosions += 1
@@ -834,6 +865,19 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             {"successful_landings": successes, "explosions": explosions, "starts": starts},
             "at least two score-advancing flights without an explosion",
         )
+        report.check(
+            "attract.lands_on_the_bonus_bullseye",
+            bonus_seen,
+            {"bonus_message_seen": bonus_seen, "starts": starts},
+            "a centre-bonus message during the demo, proving the autopilot "
+            "aims at the middle of the pad rather than its edge",
+        )
+        report.check(
+            "attract.music_irq_uninstalled",
+            not demo_music_installed,
+            {"irq_vector": demo_vector},
+            "$0314 restored to the KERNAL handler once the demo flies",
+        )
         report.equal("attract.demo_never_updates_high_score", sorted(highs), [0])
         report.check(
             "attract.final_input_exit_returns_to_title",
@@ -845,6 +889,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             "starts": starts,
             "successful_landings": successes,
             "explosions": explosions,
+            "centre_bonus_seen": bonus_seen,
             "high_scores_seen": sorted(highs),
         }
     finally:
@@ -859,6 +904,13 @@ def check_flight(session: Session, report: Report) -> None:
     monitor.inject_paused(F7)
     monitor.stop_on_store(0xD000)
     screen = session.wait_for_screen(FLIGHT_NEEDLES, 20.0)
+    installed, vector = music_irq_installed(session)
+    report.check(
+        "flight.music_irq_uninstalled",
+        not installed,
+        {"irq_vector": vector},
+        "$0314 restored to the KERNAL handler, so the title tune is silent",
+    )
     check_registers(session, report, "flight")
     pointers = list(monitor.memory_paused(session.pointer_base, session.pointer_base + 7))
     report.facts["flight_pointers"] = pointers
@@ -890,10 +942,10 @@ def check_flight(session: Session, report: Report) -> None:
     )
     report.equal("flight.flag_sprite_colour_$D02B", vic[0x2B] & 0x0F, FLAG_SPRITE_COLOR)
     report.check(
-        "flight.flag_sprite_y_expanded",
-        bool(vic[0x17] & 0x10),
+        "flight.flag_sprite_not_y_expanded",
+        not vic[0x17] & 0x10,
         {"d017": vic[0x17]},
-        "$D017 bit 4 set (sprite 4 Y-expanded)",
+        "$D017 bit 4 clear (sprite 4 unexpanded)",
     )
     flag_x = vic[FLAG_POINTER_INDEX * 2] + (256 if vic[0x10] & 0x10 else 0)
     flag_y = vic[FLAG_POINTER_INDEX * 2 + 1]
@@ -1412,16 +1464,12 @@ def check_collision_and_explosion(session: Session, report: Report) -> None:
         "a 'points' message row",
     )
     report.check(
-        "crash.post_mortem_cause_message",
-        bool(cause_rows),
-        cause_rows,
-        f"one of the cause lines {CRASH_CAUSES} before the score message",
-    )
-    report.check(
-        "crash.post_mortem_consequence_message",
-        bool(consequence_rows),
-        consequence_rows,
-        "one of the 13 DATA consequence lines before the score message",
+        "crash.post_mortem_single_message",
+        bool(cause_rows) != bool(consequence_rows),
+        {"cause": cause_rows, "consequence": consequence_rows},
+        "exactly one post-mortem tier before the score message: either a cause "
+        f"line from {CRASH_CAUSES} or one of the 13 DATA consequence lines, "
+        "never both",
     )
     report.equal("crash.lems_decremented", lems, 3)
 
