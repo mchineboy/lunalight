@@ -30,6 +30,7 @@ altered.
 | Canonical build with the per-round string collection in line 840 | 11,804-byte PRG | `$0801-$361A` | `$41FF` | 3,045 bytes |
 | Canonical build with the flag's two-sprite colour layover | 11,829-byte PRG | `$0801-$3633` | `$41FF` | 3,020 bytes |
 | Canonical build with the tempo-derived attract deadline | 11,862-byte PRG | `$0801-$3654` | `$41FF` | 2,987 bytes |
+| Canonical build with opaque attitude-matched LEM fills and current title/attract fixes | 11,977-byte PRG | `$0801-$36C7` | `$41FF` | 2,872 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -187,8 +188,36 @@ Enabling a sixth sprite in flight moved the `$D015` masks to 189 (coast) and 191
 (thrust), and the `$D010` right-half mask from `fh=99+fm` to `fh=3+fm` with
 `fm=48`: the old constant 99 set the X-MSB of sprites 5 and 6, harmless only while
 both were disabled, and `99+48` would have set bit 7 and thrown the command module
-sideways. Line 720 is byte-identical to the bank-0 fallback, so sprite 5's enable
-bit is restored by `peek(v+21)or160` in line 1212 alongside the module's.
+sideways. Line 720 is byte-identical to the bank-0 fallback, so line 1212 now
+restores sprite 5 alongside the later LEM fill and the module.
+
+#### Opaque LEM interior
+
+The original lander sprites are wireframes. When the LEM crossed the refuel
+flag, the blue pennant remained visible through the cabin and made the flag look
+as though it had been pasted over the craft. A single fill on the then-free
+sprite 6 could not solve this: fixed VIC priority places sprite 6 behind flag
+sprites 4 and 5.
+
+The exhaust therefore moved from sprite 1 to sprite 6. Sprite 1 now carries a
+black cabin mask directly behind the sprite-0 outline but ahead of every scenery
+sprite. Spare slots 246-250 hold masks for the five reachable attitude pointers
+187, 188, 189, 193 and 194; lines 185-187 map `p` to the corresponding fill
+pointer `f` and refresh the three moving pointers only when the attitude changes.
+Each mask follows the cabin silhouette while leaving the antenna and landing
+legs open. Black is deliberate: greys 11 and 12 are terrain colours and
+would make the fill merge visibly into crater walls.
+
+The three co-registered flight sprites are now outline 0, fill 1 and exhaust 6.
+Line 130 initializes pointers `p`, `f` and `p+8`; lines 185-187 refresh them on
+rotation. Lines 430-435 always move the outline/fill pair and move the disabled
+exhaust only while thrust is active. This keeps the original motion oracle
+timing: naively adding three unconditional hot-loop POKEs slowed the physics
+iteration and failed late motion samples. Coast enables every flight sprite
+except exhaust (`$D015=191`); thrust enables all eight (`$D015=255`). The high-X
+mask is `fh=67+fm`, carrying bits 0, 1 and 6 while still leaving the command
+module's bit 7 clear. Protected line 720 still writes its bank-0 value, so line
+1212 restores the fill, field and module with `PEEK(v+21) OR 162`.
 
 ### 4. Attract mode
 
@@ -207,6 +236,12 @@ a final input all returned to the title
 (`attract.keyboard_input_returns_to_title`,
 `attract.joystick_input_returns_to_title`,
 `attract.final_input_exit_returns_to_title`).
+Attract game over no longer resets lives and flies forever: line 792 clears
+`nf`, prints the shared “game over” message, and `goto20`
+(`attract.game_over_returns_to_title`). Line 20 restores bank/screen/charset but
+not `$D015`, so title re-entry used to leave the flight enable mask frozen over
+the title text; line 1020 now clears it before printing
+(`title.no_sprites_enabled_after_flight`).
 
 Those scores are the as-layered figures. The autopilot was reworked afterwards;
 see "Attract mode now plays to win" below.
@@ -474,7 +509,8 @@ The shape needed no new memory. Nine 64-byte slots of the original payload
 (244-252) were still empty after the flag took 243, so `tools/make-shapes.py`
 generalises the former `make-flag.py` to patch a table of slots. Slot 244
 resolves to `$BD00` in bank 2, and the flag's pennant field later took 245 at
-`$BD40`, leaving 246-252 spare. The load image is still 47,221 bytes and the
+`$BD40`. The LEM fills later took 246-250, leaving 251-252 spare. The load image
+is still 47,221 bytes and the
 embed layout is unchanged; only 63 zero bytes inside the payload became shape
 data. `static.only_patched_slots_differ_from_original` and
 `static.patched_slots_were_spare_now_hold_shapes` were generalised from their
@@ -486,7 +522,8 @@ Sprite 7 was the only defensible choice of the three sprites free during flight:
   the explosion cluster, so whichever one is borrowed has to be re-established
   after a round. Line 1212 does that alongside the flag, which line 720 already
   refreshes. Sprite 5 has since been claimed by the flag's pennant field, leaving
-  6 as the only unused flight sprite.
+  6 as the only unused flight sprite at that stage. The LEM fill later claimed
+  sprite 1 and moved the exhaust to sprite 6.
 - The flight loop rewrites the whole of `$D010` every time the lander crosses
   x=255, and the right-half mask `fh=227+fm` set the X-MSB of sprites 5, 6 **and**
   7. That was harmless only because those sprites were disabled. A module on any
@@ -494,9 +531,11 @@ Sprite 7 was the only defensible choice of the three sprites free during flight:
   whose MSB the crash code already leaves clear (it writes `$D010=96` for the
   right-hand explosion pair, sprites 5 and 6), so clearing bit 7 for flight as
   well was consistent with the existing explosion geometry rather than a new
-  special case. `flight.module_x_msb_clear` pins it. The mask is now `fh=3+fm`
+  special case. `flight.module_x_msb_clear` pins it. The mask became `fh=3+fm`
   with `fm=48`: once sprite 5 carried the pennant field its MSB had to track the
-  flag rather than the lander, and `99+48` would have set bit 7 again.
+  flag rather than the lander, and `99+48` would have set bit 7 again. The later
+  LEM fill/exhaust reassignment changed the current high-half mask to `fh=67+fm`,
+  adding sprites 1 and 6 while still leaving bit 7 clear.
 - The resulting sub-256 X limit costs nothing: the HUD occupies columns 34-39,
   which is sprite X 296 and up, so the module has to stay left of it anyway.
 
@@ -511,8 +550,8 @@ re-writes pointer, colour, position and the `$D015` bit after the explosion has
 finished with sprite 7. The flight masks became 157 (coast) and 159 (thrust), and
 189/191 once the pennant field joined them. Line 720 could not carry the enable
 bit because it is one of the landing lines held byte-identical to the bank-0
-fallback, hence the `peek(v+21)or160` in 1212, which now restores both borrowed
-sprites.
+fallback, hence the restore in 1212. It was `peek(v+21)or160` for the field and
+module; the LEM fill made it `or162`.
 
 ## Bank-2 layout and register findings
 
@@ -600,9 +639,9 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code | `$0801-$361A` | 11,802 loaded bytes |
-| Zero-filled runtime workspace for BASIC's variables | `$361B-$3C1A` | 1,536 |
-| `0xAA` filler through the ceiling | `$3C1B-$41FF` | 1,509 |
+| Canonical code | `$0801-$36C7` | 11,975 loaded bytes |
+| Zero-filled runtime workspace for BASIC's variables | `$36C8-$3CC7` | 1,536 |
+| `0xAA` filler through the ceiling | `$3CC8-$41FF` | 1,336 |
 
 The padded artifact passes the motion oracle and the full runtime suite,
 including the demo landings, and the filler above BASIC's live data reads back
@@ -616,7 +655,7 @@ and strings grow above the code as the game runs; the startup `STREND` snapshot
 filler overwrote live runtime data, perturbing emulation timing and the demo's
 descent. The larger reserve keeps the filler clear of that working set, so the
 capacity proof measures free space without disturbing the running program. It
-still demonstrates ~1.7 KB of contiguous filler plus the reserve above the code,
+still demonstrates ~1.3 KB of contiguous filler plus the reserve above the code,
 well clear of the music player at `$4200`.
 
 ## Verification summary
@@ -626,9 +665,9 @@ well clear of the music player at `$4200`.
 | `make verify-baseline` | Exact byte match: `archived/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 100 of 100 checks passed, including four-cell pad geometry, the flag's rendered two-colour layover, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 100-check suite, 0 gameplay failures |
-| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 96 of 96 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
+| `make verify-bank2` (canonical runtime suite) | 105 of 105 checks passed, including four-cell pad geometry, the flag's rendered two-colour layover, attitude-matched bounded LEM fills, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 105-check suite, 0 gameplay failures |
+| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 108 of 108 checks, including bounded LEM fills, the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
 | Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
 | `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 18 seconds` |

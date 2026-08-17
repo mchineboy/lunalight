@@ -24,6 +24,8 @@ are frozen; this doc describes *where* they live, not how to change them.
 
 Attract mode (`am=1`) reuses the same flight and scoring path. It never writes
 the high score. Any key or stick input during the demo restarts at line 20.
+When the demo itself reaches game over it announces the message, then takes the
+same cold restart so the title idles for another song-length wait.
 
 ---
 
@@ -56,7 +58,7 @@ sprite/background collision latch, so landing never fires.
 | 91–92   | Step the command module 8 px right each round; wrap at 240 → 104; poke sprite 7 X                                                                                                            |
 | 95–100  | Ratchet next-round spawn (`ep` leftward, `hp` more rightward drift); wrap when exhausted                                                                                                     |
 | 110–112 | Clear X-MSB to flag mask `fm`; attract may already be past x=255 and needs `fh`                                                                                                              |
-| 120–135 | Cap spawn vertical speed; set upright shape `p=187`, exhaust offset `q=8`, velocity `m2`; enable sprite–background collision bit; lander colours; refresh score bar (`1500`)                 |
+| 120–135 | Cap spawn vertical speed; set upright shape `p=187` and fill `f=246`; initialize outline/fill/exhaust pointers; set velocity, collision bit and colours; refresh score bar (`1500`) |
 
 
 ---
@@ -70,7 +72,7 @@ Entered every frame until collision or out-of-bounds.
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 160     | Read keyboard (`GET`) and joystick port 2 (`PEEK(56320)`); attract jumps to autopilot `1950`                                        |
 | 165     | Non-empty key → keyboard→joystick map (`1980`)                                                                                      |
-| 168–182 | Rotate: right (`AND 15 = 7`) increments `p`, left (`= 11`) decrements; ±90° limiter wraps through the sprite pointer band (186–195) |
+| 168–187 | Rotate: right (`AND 15 = 7`) increments `p`, left (`= 11`) decrements; ±90° limiter wraps through the pointer band; map `p` to fill `f` and refresh moving pointers |
 | 190     | `F1` → pause (`1270`), with a visible pause tile                                                                                    |
 | 200     | If out of fuel, skip thrust                                                                                                         |
 
@@ -85,8 +87,8 @@ see `jv`.
 
 | Lines   | Role                                                                                                                            |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 220     | Fire button (`jv AND 16 = 0`) or SHIFT (`PEEK(653)`): enable exhaust sprite mask `191`, keep `q=8`, go thrust                   |
-| 230–235 | Coast: gravity `m2=m2+.6`, silence voice, mask `189`; first coast frame clears `q`                                              |
+| 220     | Fire button (`jv AND 16 = 0`) or SHIFT (`PEEK(653)`): enable all sprites (`255`), keep `q=8`, go thrust                        |
+| 230–235 | Coast: gravity `m2=m2+.6`, silence voice, mask `191` (all except sprite-6 exhaust); first coast frame clears `q`               |
 | 240     | Engine voice setup (volume, ADSR, frequency, gate)                                                                              |
 | 245–290 | `ON p-186` dispatches attitude → thrust deltas and fuel burn: upright `m2-.6` / 1 fuel; angled mixes of `m2`/`hm` with 2–3 fuel |
 
@@ -102,14 +104,15 @@ for the motion oracle.
 | Lines   | Role                                                                                                                                                       |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 330–340 | Vertical integrate: `po` moves by `.1+                                                                                                                     |
-| 350–420 | Horizontal integrate: `pp` by `hm/4`; crossing 0 or 255 toggles `e2` and `$D010` between `fm` (flag MSBs) and `fh=3+fm` (lander + flags, module bit clear) |
-| 430–440 | Poke lander + exhaust XY and sprite pointers `p` / `p+q`                                                                                                   |
+| 350–420 | Horizontal integrate: `pp` by `hm/4`; crossing 0 or 255 toggles `e2` and `$D010` between `fm` (flag MSBs) and `fh=67+fm` (outline/fill/exhaust + flags, module bit clear) |
+| 430–435 | Co-register outline sprite 0 and fill sprite 1 every loop; move exhaust sprite 6 only while thrust is active                                               |
 | 460     | Ceiling clamp at `po=25`                                                                                                                                   |
 | 480     | Floor: `po>230` forces a crash with `hm=10`                                                                                                                |
 
 
 `$D010` is rewritten wholesale on wrap. `fm=48` holds both flag sprites’ MSB;
-`fh` must leave sprite 7’s MSB clear so the module stays below X 256.
+`fh=67+fm` adds the outline/fill/exhaust MSBs while leaving sprite 7 clear so
+the module stays below X 256.
 
 ---
 
@@ -158,8 +161,8 @@ Successful landings fall through to 720.
 | **752–760** | **Shared scoring lines — byte-identical to bank-0.** Velocity/horizontal/fuel penalties, bonus, accumulate `pt`                             |
 | 770         | If this was a crash (`cr`), print post-mortem (`1900`)                                                                                      |
 | 775–780     | Bonus / points / “fuel tanks full” messages via 982                                                                                         |
-| 785–795     | Game-over when out of lives or fuel; high score only if not attract; attract resets and continues                                           |
-| 835         | Attract: pick next demo pad                                                                                                                 |
+| 785–795     | Game-over when out of lives or fuel; high score only if not attract; attract prints “game over” then cold-restarts at line 20               |
+| 835         | Attract: pick next demo pad (live rounds only; attract game-over no longer reaches here)                                                    |
 | 839–840     | Zero turn score; `fu=fe`; `**gc=FRE(.)` forced string collect** (screen at `$8400` sits in the heap descent); short pause; next round at 90 |
 
 
@@ -189,7 +192,7 @@ All in-game pauses use the RNG module’s `wait` entry (`SYS 17420`), not empty
 
 | Lines     | Role                                                                                                                       |
 | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1020–1070 | Clear; draw title and “press F7”; music is still running from line 30                                                      |
+| 1020–1070 | Clear `$D015` first (literal `POKE 53269,0` — `v` is not bound yet on the first title call), then clear screen and draw title / “press F7”; music is still running from line 30 |
 | 1072      | Read published song length in jiffies from `$4206/$4207` (`PEEK(16902)+…`)                                                 |
 | 1074–1090 | Idle until `F7` (return `am=0`) or elapsed ≥ one song pass (`am=1`); any other key or stick activity resets the idle timer |
 
@@ -214,21 +217,21 @@ Attract timeout therefore tracks music tempo/length automatically.
 
 ---
 
-## Flag and command module sprites (1210–1215)
+## Fill, flag and command module sprites (1210–1215)
 
 
 | Lines | Role                                                                                                                      |
 | ----- | ------------------------------------------------------------------------------------------------------------------------- |
 | 1210  | Sprite 4: flag outline/mast, pointer 243, white (`v+43`), at `fx`/`fy`                                                    |
 | 1211  | Sprite 5: pennant field, pointer 245, blue (`v+44`), same XY (behind)                                                     |
-| 1212  | Sprite 7: command module, pointer 244, grey, Y 55; `PEEK(v+21) OR 160` re-enables field+module after line 720 clears them |
+| 1212  | Sprite 7: command module, pointer 244, grey, Y 55; `PEEK(v+21) OR 162` re-enables LEM fill + field + module after line 720 clears them |
 | 1214  | If lander is in the high X half (`e2`), keep lander MSB set                                                               |
 
 
 Never use colours 11 or 12 for the flag: they match the terrain greys.
 
-Flight enable masks: **189** coast / **191** thrust. Line 720 is a protected
-scoring neighbour, so field/module bits are restored here instead.
+Flight enable masks: **191** coast / **255** thrust. Line 720 is a protected
+scoring neighbour, so fill/field/module bits are restored here instead.
 
 ---
 
@@ -312,9 +315,10 @@ the `cn` wrap (`>12 → cn-13`).
 | `po` / `pp`                   | Lander Y / X (0–255; `e2` marks X≥256)                          |
 | `m2` / `hm`                   | Vertical / horizontal momentum                                  |
 | `p` / `q`                     | Lander shape pointer / exhaust offset (8 when thrusting)        |
+| `f`                           | Attitude-matched black LEM fill pointer (246-250)               |
 | `fe` / `fu`                   | Current fuel / fuel at round start (scoring)                    |
 | `e2`                          | High-X half-screen flag for lander                              |
-| `fm` / `fh`                   | `$D010` masks: flags only / lander+flags                        |
+| `fm` / `fh`                   | `$D010` masks: flags only / outline+fill+exhaust+flags          |
 | `px`/`pw`/`py`/`pb`/`rf`/`ph` | Pad left X, width (glyphs), Y, points, refuel flag, height band |
 | `lz` / `pf` / `xz`            | Landing pad index, verdict centre X, off-pad crash mark         |
 | `am`                          | Attract mode                                                    |

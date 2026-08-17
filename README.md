@@ -71,6 +71,7 @@ Added by the promotion (all verified, see below):
 | Landing pads | Five generated pads, always four glyphs (32 pixels) wide, with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The fixed width gives the 24-pixel LEM four pixels of visual clearance on each side, including inset pads. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
 | Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, white, unexpanded. The pennant carries an Earth wire-globe emblem, and a solid pennant field from spare slot 245 (`$BD40`) sits on sprite 5 at the same coordinates in blue, one priority step behind, so the emblem and mast read as white on blue. This is the Earth decoration’s two-sprite layover: a single sprite could only draw the outline, which read as an empty wire frame, and colours 11 and 12 are unavailable because the terrain is painted in those greys |
+| Opaque LEM interior | Five black cabin masks in spare slots 246-250 match the reachable attitudes 187, 188, 189, 193 and 194. Sprite 1 draws the selected mask behind the sprite-0 wireframe but ahead of the scenery sprites, preventing the flag or terrain from showing through while leaving the antenna and landing legs open. Exhaust moved from sprite 1 to sprite 6 |
 | Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
@@ -78,8 +79,8 @@ Added by the promotion (all verified, see below):
 
 The original sprite payload, the physics constants, the oracle tolerances and the
 motion fixture are unchanged by the promotion. Only the sprite payload’s **load
-address** is rebased; its bytes are untouched apart from the flag, command module
-and pennant field written into the previously empty slots 243, 244 and 245.
+address** is rebased; its bytes are untouched apart from the flag, command module,
+pennant field and LEM fills written into the previously empty slots 243-250.
 
 ## Controls
 

@@ -15,20 +15,22 @@
   110 e2=.:pokev+39,0:pokev+40,0:pokev+16,fm
   112 ifamthenifpp>255thene2=1:pp=pp-256:pokev+16,fh
   120 ifn2>47thenn2=37
-  130 p=187:q=8:m2=n2:n2=n2+4:pokev+17,peek(v+17)or16
-  135 pokev+39,12:pokev+40,8:gosub1500
+  130 p=187:f=246:q=8:m2=n2:n2=n2+4:pokepn,p:pokepn+1,f:pokepn+6,p+8:pokev+17,peek(v+17)or16
+  135 pokev+39,12:pokev+40,0:pokev+45,8:gosub1500
   160 getz$:jv=peek(56320):ifamthen1950
   165 ifz$<>""thengosub1980
   168 if(jvand15)=15then190
-  170 if(jvand15)=7thenp=p+1:ifp=190thenp=189:goto200
-  172 ifp=195thenp=187:goto200
-  180 if(jvand15)=11thenp=p-1:ifp=186thenp=194:goto200
-  182 ifp=192thenp=193:goto200
+  170 if(jvand15)=7thenp=p+1:ifp=190thenp=189:goto185
+  172 ifp=195thenp=187:goto185
+  180 if(jvand15)=11thenp=p-1:ifp=186thenp=194:goto185
+  182 ifp=192thenp=193:goto185
+  185 f=p+59:ifp>189thenf=p+56
+  187 pokepn,p:pokepn+1,f:pokepn+6,p+8
   190 ifz$="{f1}"thenpoke33792,134:poke55296,7:goto1270
   200 iffe=.goto230
-  220 if(jvand16)=.orpeek(653)thenpokev+21,191:q=8:goto240
+  220 if(jvand16)=.orpeek(653)thenpokev+21,255:q=8:goto240
   230 ifq=.thenm2=m2+.6:pokes+4,128:goto330
-  235 q=.:m2=m2+.6:pokev+21,189:pokes+4,128:goto330
+  235 q=.:m2=m2+.6:pokev+21,191:pokes+4,128:goto330
   240 pokes+24,15:pokes+5,128:pokes+6,128:pokes+1,8:pokes,200:pokes+4,129
   245 onp-186goto250,260,280,330,330,330,290,270
   250 m2=m2-.6:fe=fe-1:goto330
@@ -48,7 +50,7 @@
   410 ife2=.thenifpp>255thene2=1:pp=pp-255:pokev+16,fh:goto430
   420 ife2thenifpp>87thene2=.:pp=pp-87:pokev+16,fm
   430 pokev,pp:pokev+1,po:pokev+2,pp:pokev+3,po
-  440 pokepn,p:pokepn+1,p+q
+  435 ifqthenpokev+12,pp:pokev+13,po
   460 ifpo<25thenpo=25
   480 ifpo>230thenhm=10:goto1320
   500 ifm2<3thenprint"{grn}";:goto530
@@ -99,7 +101,7 @@
   780 ife7thene7=.:a$="{lgrn}fuel tanks full":gosub982
   785 ifnm<.orfe<1thennf=1:nm=.
   790 ifnf=1thena$="{rvof}{orng}game over":ep=250:hp=-20:ifpt>hsthenifam=.thenhs=pt:gosub1500
-  792 ifnfthenifamthenpt=.:nm=4:nf=.:fe=1000:goto835
+  792 ifnfthenifamthennf=.:gosub982:goto20
   795 ifnfgoto982
   835 ifamthengosub1920
   839 rem screen sits at $8400 inside the string heap's descent; collect here
@@ -115,7 +117,7 @@
   990 forl=54272to54296:pokel,0:next
   1000 poke54296,10:poke54277,64:poke54273,17:poke54272,37:poke54276,17
   1010 poke679,1:sys17420:poke54276,16:return
-  1020 am=.:print"{clr}":poke53280,11:poke53281,0
+  1020 am=.:poke53269,.:print"{clr}":poke53280,11:poke53281,0
   1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
   1040 poke214,16:print:print"{lblu}   public domain 2024 steven hardison"
   1050 print"{down}";
@@ -164,17 +166,18 @@
   1177 forln=13-htto12:sc=160:ifln=13-htthenifhr>htthensc=108
   1178 ifln=13-htthenifsc=160thenifhl>htthensc=123
   1180 pk=sn+ln*40+c:pokepk,sc:gosub900:pokepk+bc,tc:if(rvand3)=1thenpokepk+bc,td
+  1185 ifrv=.thenpokepk,160:pokepk+bc,1
   1190 nextln:nextc
   1192 fori=1to5:cs=int((px(i)-24)/8):ce=cs+pw(i)-1:ln=13-ph(i):pk=sn+ln*40
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
   1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
   1197 fx=px(rz)-3:fm=.:iffx>255thenfm=48:fx=fx-256
-  1198 fh=3+fm:fy=py(rz)-5:gosub1210
+  1198 fh=67+fm:fy=py(rz)-5:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
   1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,1:pokev+23,.:pokev+28,.
   1211 poke34813,245:pokev+10,fx:pokev+11,fy:pokev+44,6
-  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or160
-  1213 rem or160 re-arms the field and module bits 720 clears; 1214 the lander msb
+  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or162
+  1213 rem or162 re-arms the fill, field and module bits; 1214 the lander msb
   1214 ife2thenpokev+16,peek(v+16)or1
   1215 return
   1270 getz$

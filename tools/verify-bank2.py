@@ -64,6 +64,11 @@ FLAG_SPRITE_COLOR = 1
 FIELD_SLOT = 245
 FIELD_POINTER_INDEX = 5
 FIELD_SPRITE_COLOR = 6
+LEM_FILL_SLOTS = (246, 247, 248, 249, 250)
+LEM_FILL_ATTITUDES = dict(zip(LEM_FILL_SLOTS, (187, 188, 189, 193, 194)))
+LEM_FILL_POINTER_INDEX = 1
+LEM_FILL_SPRITE_COLOR = 0
+EXHAUST_POINTER_INDEX = 6
 # Rows of the flag shape the pennant (and therefore the field block) occupies.
 PENNANT_ROWS = 12
 # The cosmetic orbiting command module lives on sprite 7, pointer slot 244,
@@ -74,7 +79,7 @@ MODULE_POINTER_INDEX = 7
 MODULE_SPRITE_COLOR = 15
 MODULE_SPRITE_Y = 55
 # Shapes patched into spare slots of the original payload by make-shapes.py.
-PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT, FIELD_SLOT)
+PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT, FIELD_SLOT) + LEM_FILL_SLOTS
 FLIGHT_POINTERS = {
     2: 253,
     3: 254,
@@ -82,14 +87,14 @@ FLIGHT_POINTERS = {
     MODULE_POINTER_INDEX: MODULE_SLOT,
 }
 EXPLOSION_POINTER_RANGE = (203, 242)
-# $D015 enable masks the flight loop writes: coast keeps the lander, the two
-# decoration sprites, the flag, its pennant field and the command module
-# (bits 0,2,3,4,5,7 = 189); thrust adds the exhaust sprite (bit 1) for 191.
-COAST_ENABLE = 189
-THRUST_ENABLE = 191
+# $D015 enable masks the flight loop writes: coast keeps the lander, its black
+# interior fill, the two decoration sprites, the flag pair and command module
+# (all but exhaust sprite 6 = 191); thrust enables all eight sprites.
+COAST_ENABLE = 191
+THRUST_ENABLE = 255
 # Sprite pointers the source POKEs during flight, the added shapes and explosion.
 USED_POINTERS = (
-    tuple(range(187, 195))
+    tuple(range(187, 203))
     + tuple(range(203, 243))
     + PATCHED_SLOTS
     + (253, 254)
@@ -291,6 +296,34 @@ def static_layout(args: argparse.Namespace, report: Report) -> dict[str, Any]:
         "shape bytes of slots "
         + ", ".join(str(slot) for slot in PATCHED_SLOTS)
         + " empty in the original, non-empty after patching",
+    )
+    fill_outside: dict[int, list[tuple[int, int]]] = {}
+    for slot, attitude in LEM_FILL_ATTITUDES.items():
+        fill_off = slot_offsets[slot]
+        outline_off = attitude * 64 - original_addr
+        outside: list[tuple[int, int]] = []
+        for row in range(21):
+            outline_x = [
+                x
+                for x in range(24)
+                if original[outline_off + row * 3 + x // 8] & (0x80 >> (x % 8))
+            ]
+            for x in range(24):
+                filled = sprites[fill_off + row * 3 + x // 8] & (0x80 >> (x % 8))
+                if filled and (
+                    len(outline_x) < 2
+                    or x < min(outline_x)
+                    or x > max(outline_x)
+                ):
+                    outside.append((x, row))
+        if outside:
+            fill_outside[slot] = outside
+    report.check(
+        "static.lem_fill_pixels_within_outline_envelopes",
+        not fill_outside,
+        fill_outside,
+        "every black fill pixel lies between outline pixels on the matching "
+        "lander attitude's scanline",
     )
     report.equal(
         "static.sprite_bank_offset_preserved",
@@ -494,7 +527,7 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         f"{FLAG_SPRITE_COLOR}",
         1211: f"poke34813,{FIELD_SLOT}:pokev+10,fx:pokev+11,fy:pokev+44,"
         f"{FIELD_SPRITE_COLOR}",
-        1212: "pokev+21,peek(v+21)or160",
+        1212: "pokev+21,peek(v+21)or162",
     }
     layover_diff = [
         line
@@ -509,7 +542,34 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
             "lines": {line: variant.get(line) for line in layover},
         },
         f"flag colour to $D02B, field slot {FIELD_SLOT} and colour to $D02C at the "
-        "flag's coordinates, and $D015 bits 5 and 7 restored after line 720",
+        "flag's coordinates, and $D015 bits 1, 5 and 7 restored after line 720",
+    )
+    lem_fill = {
+        130: "p=187:f=246",
+        135: "pokev+40,0:pokev+45,8",
+        185: "f=p+59:ifp>189thenf=p+56",
+        187: "pokepn,p:pokepn+1,f:pokepn+6,p+8",
+        220: "pokev+21,255",
+        235: "pokev+21,191",
+        430: "pokev,pp:pokev+1,po:pokev+2,pp:pokev+3,po",
+        435: "ifqthenpokev+12,pp:pokev+13,po",
+        1198: "fh=67+fm",
+        1212: "pokev+21,peek(v+21)or162",
+    }
+    lem_fill_diff = [
+        line
+        for line, expected in lem_fill.items()
+        if line not in variant or _normalize(expected) not in _normalize(variant[line])
+    ]
+    report.check(
+        "flight.lander_fill_register_arithmetic",
+        not lem_fill_diff,
+        {
+            "differing": lem_fill_diff,
+            "lines": {line: variant.get(line) for line in lem_fill},
+        },
+        "sprite 1 black fill tracks the attitude and position, sprite 6 carries "
+        "the conditional exhaust, and enable/MSB masks include both",
     )
     report.check(
         "landing.generated_pads_are_four_glyphs_wide",
@@ -536,6 +596,19 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
             "lines": {line: variant.get(line) for line in planned_miss},
         },
         "the demo centres three approaches, then aims outside the pad on the fourth",
+    )
+
+    # The demo plays one game and hands the screen back to the title for a fresh
+    # idle wait. Clearing nf first is load-bearing: the shared message routine
+    # ends at 984, which sends a game-over message into the F7 wait at 960, so a
+    # demo that kept nf set would stall there instead of restarting.
+    attract_exit = "ifnfthenifamthennf=.:gosub982:goto20"
+    report.check(
+        "attract.game_over_returns_to_title",
+        792 in variant and _normalize(attract_exit) in _normalize(variant[792]),
+        {"line_792": variant.get(792)},
+        "attract game over announces itself and restarts at line 20 rather than "
+        "resetting lives and flying on indefinitely",
     )
 
     # Scoring arithmetic shared with the bank-0 fallback (velocity, tilt and fuel
@@ -901,6 +974,15 @@ def trigger_attract(session: Session) -> list[str]:
     return session.wait_for_screen((*FLIGHT_NEEDLES, ATTRACT_NEEDLE), 30.0)
 
 
+def sprites_enabled(session: Session) -> int:
+    """Read $D015 at this instant, then let the emulator run on."""
+    monitor = session.monitor
+    assert monitor is not None
+    mask = monitor.memory_paused(0xD015, 0xD015)[0]
+    monitor.resume()
+    return mask
+
+
 def status_values(screen: list[str]) -> tuple[int | None, int | None, int | None]:
     text = "\n".join(screen).lower()
     high = re.search(r"\bhi\s*(-?\d+)", text)
@@ -927,6 +1009,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
     explosions = 0
     bonus_seen = False
     highs: set[int] = set()
+    title_sprites: dict[str, int] = {}
     try:
         monitor.set_joyport(1, 0x1F)
         session.wait_for_screen(TITLE_NEEDLES, args.startup_timeout)
@@ -935,11 +1018,13 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         keyboard_text = "\n".join(keyboard_demo).lower()
         monitor.inject_paused(CURSOR_RIGHT)
         keyboard_exit = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        title_sprites["keyboard_exit"] = sprites_enabled(session)
 
         joystick_demo = trigger_attract(session)
         joystick_text = "\n".join(joystick_demo).lower()
         monitor.set_joyport(1, 0x17)
         joystick_exit = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        title_sprites["joystick_exit"] = sprites_enabled(session)
         monitor.set_joyport(1, 0x1F)
 
         flight = trigger_attract(session)
@@ -1018,6 +1103,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         session.snapshot("outcome")
         monitor.inject_paused(CURSOR_RIGHT)
         final_title = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        title_sprites["final_exit"] = sprites_enabled(session)
 
         keyboard_exit_text = "\n".join(keyboard_exit).lower()
         joystick_exit_text = "\n".join(joystick_exit).lower()
@@ -1094,12 +1180,26 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             [line for line in final_title if line.strip()],
             list(TITLE_NEEDLES),
         )
+        # Line 20 restores the bank, screen base and character source but not
+        # $D015, so a title re-entered from flight used to keep the demo's enable
+        # mask: lander, exhaust, Earth pair, flag pair and command module frozen
+        # over the title text. Line 1020 clears the register before it prints, so
+        # the mask must read zero by the time the title text is on screen.
+        report.check(
+            "title.no_sprites_enabled_after_flight",
+            all(mask == 0 for mask in title_sprites.values()),
+            {name: f"${mask:02X}" for name, mask in title_sprites.items()},
+            "$D015 zero on every title screen re-entered from the demo",
+        )
         report.facts["attract"] = {
             "starts": starts,
             "successful_landings": successes,
             "explosions": explosions,
             "centre_bonus_seen": bonus_seen,
             "high_scores_seen": sorted(highs),
+            "title_sprite_masks": {
+                name: f"${mask:02X}" for name, mask in title_sprites.items()
+            },
             "string_heap": {
                 "seeded_fretop": f"${heap_seed:04X}",
                 "lowest_fretop": f"${heap_low:04X}",
@@ -1129,11 +1229,21 @@ def check_flight(session: Session, report: Report) -> None:
     check_registers(session, report, "flight")
     pointers = list(monitor.memory_paused(session.pointer_base, session.pointer_base + 7))
     report.facts["flight_pointers"] = pointers
+    lander_pointer = pointers[0]
+    expected_fill = (
+        lander_pointer + 59 if lander_pointer <= 189 else lander_pointer + 56
+    )
     report.check(
         f"flight.player_pointers_at_${session.pointer_base:04X}",
-        pointers[0] in range(187, 195) and pointers[1] in range(187, 203),
-        pointers[:2],
-        "187-194 lander shape and its thrust companion",
+        lander_pointer in range(187, 195)
+        and pointers[LEM_FILL_POINTER_INDEX] == expected_fill
+        and pointers[EXHAUST_POINTER_INDEX] == lander_pointer + 8,
+        {
+            "lander": lander_pointer,
+            "fill": pointers[LEM_FILL_POINTER_INDEX],
+            "exhaust": pointers[EXHAUST_POINTER_INDEX],
+        },
+        "187-194 lander shape, its attitude-matched fill and thrust companion",
     )
     for index, expected in FLIGHT_POINTERS.items():
         report.equal(
@@ -1149,6 +1259,22 @@ def check_flight(session: Session, report: Report) -> None:
     )
     vic = monitor.memory_paused(0xD000, 0xD02F)
     enable = vic[0x15]
+    report.check(
+        "flight.lander_fill_registered_behind_outline",
+        bool(enable & (1 << LEM_FILL_POINTER_INDEX))
+        and pointers[LEM_FILL_POINTER_INDEX] in LEM_FILL_SLOTS
+        and vic[2] == vic[0]
+        and vic[3] == vic[1]
+        and vic[0x28] & 0x0F == LEM_FILL_SPRITE_COLOR,
+        {
+            "d015": enable,
+            "pointer": pointers[LEM_FILL_POINTER_INDEX],
+            "outline_xy": [vic[0], vic[1]],
+            "fill_xy": [vic[2], vic[3]],
+            "colour": vic[0x28] & 0x0F,
+        },
+        "black sprite 1 fill enabled at the lander outline's coordinates",
+    )
     report.check(
         "flight.flag_sprite_enabled",
         bool(enable & 0x10) and enable in (COAST_ENABLE, THRUST_ENABLE),
@@ -1482,12 +1608,14 @@ def check_controls(args: argparse.Namespace, report: Report) -> None:
         monitor.set_joyport(1, 0x1F)
 
         monitor.set_joyport(1, 0x0F)
-        # The left-direction checkpoint stopped at pointer 0, so consume its
-        # pointer-1 write before waiting for the fire-processed loop.
-        monitor.stop_on_store(session.pointer_base + 1)
-        monitor.stop_on_store(session.pointer_base + 1)
+        # The left-direction checkpoint stopped at pointer 0. Resume through the
+        # remaining change-only pointer writes and stop when fire updates $D015.
+        monitor.stop_on_store(0xD015)
         joy_fire_pointers = list(
-            monitor.memory_paused(session.pointer_base, session.pointer_base + 1)
+            monitor.memory_paused(
+                session.pointer_base,
+                session.pointer_base + EXHAUST_POINTER_INDEX,
+            )
         )
         joy_fire_enabled = monitor.memory_paused(0xD015, 0xD015)[0]
         monitor.set_joyport(1, 0x1F)
@@ -1506,11 +1634,14 @@ def check_controls(args: argparse.Namespace, report: Report) -> None:
             monitor.set_memory(653, b"\x01")
             monitor.advance_instructions(50)
             key_fire_pointers = list(
-                monitor.memory_paused(session.pointer_base, session.pointer_base + 1)
+                monitor.memory_paused(
+                    session.pointer_base,
+                    session.pointer_base + EXHAUST_POINTER_INDEX,
+                )
             )
             key_fire_enabled = monitor.memory_paused(0xD015, 0xD015)[0]
             if (
-                key_fire_pointers[1] - key_fire_pointers[0] == 8
+                key_fire_pointers[EXHAUST_POINTER_INDEX] - key_fire_pointers[0] == 8
                 and key_fire_enabled == THRUST_ENABLE
             ):
                 break
@@ -1535,19 +1666,19 @@ def check_controls(args: argparse.Namespace, report: Report) -> None:
         report.equal("controls.joystick2_left_rotates", joy_left, initial)
         report.check(
             "controls.joystick2_fire_thrusts",
-            joy_fire_pointers[1] - joy_fire_pointers[0] == 8
+            joy_fire_pointers[EXHAUST_POINTER_INDEX] - joy_fire_pointers[0] == 8
             and joy_fire_enabled == THRUST_ENABLE,
             {"pointers": joy_fire_pointers, "d015": joy_fire_enabled},
-            f"companion pointer = player + 8 and $D015={THRUST_ENABLE}",
+            f"sprite 6 exhaust pointer = player + 8 and $D015={THRUST_ENABLE}",
         )
         report.equal("controls.keyboard_right_fallback", key_right, initial + 1)
         report.equal("controls.keyboard_down_fallback", key_down, initial)
         report.check(
             "controls.keyboard_modifier_fallback_thrusts",
-            key_fire_pointers[1] - key_fire_pointers[0] == 8
+            key_fire_pointers[EXHAUST_POINTER_INDEX] - key_fire_pointers[0] == 8
             and key_fire_enabled == THRUST_ENABLE,
             {"pointers": key_fire_pointers, "d015": key_fire_enabled},
-            f"PEEK(653) produces companion pointer +8 and $D015={THRUST_ENABLE}",
+            f"PEEK(653) enables sprite 6 exhaust and $D015={THRUST_ENABLE}",
         )
         report.equal(
             f"controls.pause_tile_before_restart_at_${session.screen_base:04X}",
