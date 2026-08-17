@@ -169,7 +169,7 @@
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
   1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
   1197 fx=px(rz)-3:fm=.:iffx>255thenfm=48:fx=fx-256
-  1198 fh=3+fm:fy=py(rz)-7:gosub1210
+  1198 fh=3+fm:fy=py(rz)-5:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
   1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,1:pokev+23,.:pokev+28,.
   1211 poke34813,245:pokev+10,fx:pokev+11,fy:pokev+44,6

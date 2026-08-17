@@ -24,6 +24,8 @@ assembly helpers.
 
 Layer evidence and measured results:
 [`docs/feature-layering.md`](docs/feature-layering.md).
+Section map of the canonical BASIC source:
+[`docs/lunalight-bas.md`](docs/lunalight-bas.md).
 
 ## Lineage
 
@@ -68,7 +70,7 @@ Added by the promotion (all verified, see below):
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
 | Landing pads | Five generated pads, always four glyphs (32 pixels) wide, with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The fixed width gives the 24-pixel LEM four pixels of visual clearance on each side, including inset pads. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
-| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, light blue, unexpanded. The pennant carries an Earth wire-globe emblem |
+| Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, white, unexpanded. The pennant carries an Earth wire-globe emblem, and a solid pennant field from spare slot 245 (`$BD40`) sits on sprite 5 at the same coordinates in blue, one priority step behind, so the emblem and mast read as white on blue. This is the Earth decoration’s two-sprite layover: a single sprite could only draw the outline, which read as an empty wire frame, and colours 11 and 12 are unavailable because the terrain is painted in those greys |
 | Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
@@ -76,8 +78,8 @@ Added by the promotion (all verified, see below):
 
 The original sprite payload, the physics constants, the oracle tolerances and the
 motion fixture are unchanged by the promotion. Only the sprite payload’s **load
-address** is rebased; its bytes are untouched apart from the flag and command
-module written into the previously empty slots 243 and 244.
+address** is rebased; its bytes are untouched apart from the flag, command module
+and pennant field written into the previously empty slots 243, 244 and 245.
 
 ## Controls
 
@@ -217,14 +219,14 @@ CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`–`$361A` | Blitz machine code (11,804-byte PRG for the promoted source) |
-| `$361B`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,045 bytes of headroom to the music player |
+| `$0801`–`$3654` | Blitz machine code (11,862-byte PRG for the promoted source) |
+| `$3655`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 2,987 bytes of headroom to the music player |
 | `$4200`–`$43F0` | Three-voice title soundtrack player (loop length published at `$4206/$4207`); 15 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
 | `$8400`–`$87FF` | Screen matrix and sprite pointers, also seen by the VIC below |
 | `$9FFF` downward | BASIC string heap (`MEMSIZ $A000`). The screen lies in its descent path and `STREND` is too low for BASIC to collect on its own, so line 840 forces one collection per round with `gc=fre(.)` |
-| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244 |
+| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244, flag pennant field in slot 245 |
 
 What the VIC sees in bank 2 (`$8000-$BFFF`):
 
@@ -236,11 +238,13 @@ What the VIC sees in bank 2 (`$8000-$BFFF`):
 | `$AEC0`–`$B0BF` | Lander shapes, pointers 187-194 |
 | `$B2C0`–`$BCBF` | Explosion shapes, pointers 203-242 |
 | `$BCC0`–`$BCFF` | Refuel flag, pointer slot 243 |
+| `$BD00`–`$BD3F` | Command module, pointer slot 244 |
+| `$BD40`–`$BD7F` | Refuel flag pennant field, pointer slot 245 |
 | `$BF40`–`$BFBF` | Decoration shapes, pointers 253 and 254 |
 
 `$D018` reads back as `$15` because bit 0 is unused. The sprite payload’s tail
 runs past `$C000`, outside the bank; every pointer the game actually uses
-(187-194, 203-242, 243, 253, 254) resolves below `$BFFF`, which the verifier
+(187-194, 203-242, 243-245, 253, 254) resolves below `$BFFF`, which the verifier
 checks. `tools/embed-sprites.py` fails the build if segments would overlap.
 
 The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
@@ -270,7 +274,7 @@ position drift, not feel.
 | [`tools/verify-bank2.py`](tools/verify-bank2.py) | Canonical layout and runtime suite |
 | [`tools/bank2-capacity.py`](tools/bank2-capacity.py) | Measure bank-2 headroom and emit the padded capacity artifact |
 | [`tools/rebase-prg-load.py`](tools/rebase-prg-load.py) | Change a PRG load address without touching its payload |
-| [`tools/make-shapes.py`](tools/make-shapes.py) | Write the refuel flag and command module into spare sprite slots 243 and 244 |
+| [`tools/make-shapes.py`](tools/make-shapes.py) | Write the refuel flag, command module and the flag’s pennant field into spare sprite slots 243, 244 and 245 |
 | [`tools/vice_monitor.py`](tools/vice_monitor.py) | Shared VICE monitor helpers |
 | [`tools/embed-sprites.py`](tools/embed-sprites.py) | Merge PRG + address-sorted asset PRGs |
 | [`tools/attract-sim.py`](tools/attract-sim.py) | Python sim of the attract/terrain path |

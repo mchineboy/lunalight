@@ -28,6 +28,8 @@ altered.
 | Canonical build with the dive-and-burn attract descent | 11,676 bytes | `$0801-$359A` | `$41FF` | 3,173 bytes |
 | Canonical build with four-cell pads, slope glyphs and the 3:1 demo cadence | 11,793-byte PRG | `$0801-$360F` | `$41FF` | 3,056 bytes |
 | Canonical build with the per-round string collection in line 840 | 11,804-byte PRG | `$0801-$361A` | `$41FF` | 3,045 bytes |
+| Canonical build with the flag's two-sprite colour layover | 11,829-byte PRG | `$0801-$3633` | `$41FF` | 3,020 bytes |
+| Canonical build with the tempo-derived attract deadline | 11,862-byte PRG | `$0801-$3654` | `$41FF` | 2,987 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -137,19 +139,56 @@ threshold 5 and the tilt and upright-shape gates unchanged.
 
 The refuel flag is the original payload's previously empty slot 243, patched by
 `tools/make-shapes.py` and carried through the rebase: only that 64-byte block
-and slot 244's, added later for the command module, differ from
-`sprites/lsprite.prg` (`static.only_patched_slots_differ_from_original`,
+and those of slots 244 and 245, added later for the command module and the flag's
+pennant field, differ from `sprites/lsprite.prg`
+(`static.only_patched_slots_differ_from_original`,
 `static.patched_slots_were_spare_now_hold_shapes`), it resolves to `$BCC0`
 (`static.flag_block_maps_to_bank2_address`,
 `runtime.flag_shape_resident_at_$BCC0`), and at runtime it is pointer 4 = 243,
-light blue, unexpanded, enabled in `$D015` (`flight.flag_pointer[4]_at_$87FC`,
+white, unexpanded, enabled in `$D015` (`flight.flag_pointer[4]_at_$87FC`,
 `flight.flag_sprite_colour_$D02B`, `flight.flag_sprite_not_y_expanded`,
 `flight.flag_sprite_enabled`).
 
 The shape is an Earth wire-globe pennant, not the earlier national flag, and it
 renders at the sprite's natural 21-pixel height. Line 1198 therefore places it
-at `fy=py(rz)-7` instead of `py(rz)-27` so the mast base still rests on the pad
-line.
+at `fy=py(rz)-5` instead of `py(rz)-27` so the mast base still rests on the pad
+line. The offset was `-7` until the rendered frame showed the base two pixels
+clear of the pad's surface glyph, which read as the flag floating; at `-5` the
+base row and the surface line share a pixel row.
+
+#### Two-sprite colour layover
+
+A single hi-res sprite made the flag an outline enclosing the sky, which read as
+an empty wire frame. The fix is the technique the Earth decoration already uses
+(slot 254's solid disc under slot 253's detail, sprites 3 and 2): slot 245 holds a
+solid block covering exactly the pennant's bounding box, drawn on sprite 5 in blue
+one priority step behind the flag, whose outline, emblem and mast are now white.
+Line 1211 registers it on the flag's coordinates and line 1210 recolours the front
+sprite; measured cost is 25 bytes of compiled code (11,829 versus 11,804 bytes of
+PRG, ending `$3633` instead of `$361A`).
+
+Three constraints fixed the palette. Medium grey against light blue separates by
+about 6 of 255 in luminance, so the emblem read as hue alone on one-pixel lines --
+the "flat" appearance. The terrain is painted in colours 11 and 12, so any grey
+field merges with the ground. The mast and base sit on the front sprite against
+black sky, so the front sprite has to be the lighter of the pair; white over blue
+satisfies all three and borrows the Earth's palette.
+
+Sprite 5's power-on colour is itself blue, which makes a register-only assertion
+worthless here: the first attempt wrote the field colour to `$D02D` instead of
+`$D02C`, and the field still rendered blue by coincidence while a verifier check
+reading the same wrong register passed. Two checks close that gap.
+`flight.flag_layover_register_arithmetic` pins the source text of lines 1210-1212,
+and `flight.flag_layover_rendered_in_two_colours` samples VICE's frame around the
+pennant and requires both colours in quantity, the field in horizontal runs of at
+least 8 pixels so a field reduced to an outline would fail.
+
+Enabling a sixth sprite in flight moved the `$D015` masks to 189 (coast) and 191
+(thrust), and the `$D010` right-half mask from `fh=99+fm` to `fh=3+fm` with
+`fm=48`: the old constant 99 set the X-MSB of sprites 5 and 6, harmless only while
+both were disabled, and `99+48` would have set bit 7 and thrown the command module
+sideways. Line 720 is byte-identical to the bank-0 fallback, so sprite 5's enable
+bit is restored by `peek(v+21)or160` in line 1212 alongside the module's.
 
 ### 4. Attract mode
 
@@ -434,7 +473,8 @@ bytes of PRG), leaving 3,262 bytes of headroom below the music player.
 The shape needed no new memory. Nine 64-byte slots of the original payload
 (244-252) were still empty after the flag took 243, so `tools/make-shapes.py`
 generalises the former `make-flag.py` to patch a table of slots. Slot 244
-resolves to `$BD00` in bank 2. The load image is still 47,221 bytes and the
+resolves to `$BD00` in bank 2, and the flag's pennant field later took 245 at
+`$BD40`, leaving 246-252 spare. The load image is still 47,221 bytes and the
 embed layout is unchanged; only 63 zero bytes inside the payload became shape
 data. `static.only_patched_slots_differ_from_original` and
 `static.patched_slots_were_spare_now_hold_shapes` were generalised from their
@@ -442,17 +482,21 @@ flag-only predecessors to assert exactly that for both slots.
 
 Sprite 7 was the only defensible choice of the three sprites free during flight:
 
-- Sprites 5, 6 and 7 carry no flight duty, but all three belong to the explosion
-  cluster, so whichever one is borrowed has to be re-established after a round.
-  Line 1212 does that alongside the flag, which line 720 already refreshes.
+- Sprites 5, 6 and 7 carried no flight duty at the time, but all three belong to
+  the explosion cluster, so whichever one is borrowed has to be re-established
+  after a round. Line 1212 does that alongside the flag, which line 720 already
+  refreshes. Sprite 5 has since been claimed by the flag's pennant field, leaving
+  6 as the only unused flight sprite.
 - The flight loop rewrites the whole of `$D010` every time the lander crosses
   x=255, and the right-half mask `fh=227+fm` set the X-MSB of sprites 5, 6 **and**
   7. That was harmless only because those sprites were disabled. A module on any
   of them would jump 256 pixels sideways at each crossing. Sprite 7 is the one
   whose MSB the crash code already leaves clear (it writes `$D010=96` for the
   right-hand explosion pair, sprites 5 and 6), so clearing bit 7 for flight as
-  well — `fh=99+fm` — is consistent with the existing explosion geometry rather
-  than a new special case. `flight.module_x_msb_clear` pins it.
+  well was consistent with the existing explosion geometry rather than a new
+  special case. `flight.module_x_msb_clear` pins it. The mask is now `fh=3+fm`
+  with `fm=48`: once sprite 5 carried the pennant field its MSB had to track the
+  flag rather than the lander, and `99+48` would have set bit 7 again.
 - The resulting sub-256 X limit costs nothing: the HUD occupies columns 34-39,
   which is sprite X 296 and up, so the module has to stay left of it anyway.
 
@@ -464,9 +508,11 @@ lowest display priority, so the lander passes in front of it.
 Motion is per-round rather than per-frame, which keeps the hot loop untouched:
 line 91 steps `mx` by 8 and wraps at 240, line 92 writes it, and line 1212
 re-writes pointer, colour, position and the `$D015` bit after the explosion has
-finished with sprite 7. The flight masks became 157 (coast) and 159 (thrust).
-Line 720 could not carry the enable bit because it is one of the landing lines
-held byte-identical to the bank-0 fallback, hence the `peek(v+21)or128` in 1212.
+finished with sprite 7. The flight masks became 157 (coast) and 159 (thrust), and
+189/191 once the pennant field joined them. Line 720 could not carry the enable
+bit because it is one of the landing lines held byte-identical to the bank-0
+fallback, hence the `peek(v+21)or160` in 1212, which now restores both borrowed
+sprites.
 
 ## Bank-2 layout and register findings
 
@@ -580,8 +626,8 @@ well clear of the music player at `$4200`.
 | `make verify-baseline` | Exact byte match: `archived/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 93 of 93 checks passed, including four-cell pad geometry, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 93-check suite, 0 gameplay failures |
+| `make verify-bank2` (canonical runtime suite) | 100 of 100 checks passed, including four-cell pad geometry, the flag's rendered two-colour layover, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 100-check suite, 0 gameplay failures |
 | `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 96 of 96 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
 | Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
