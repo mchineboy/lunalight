@@ -211,23 +211,31 @@
   1923 ifal=akthenal=al+1:ifal>5thenal=1
   1924 ak=al:iffe<400thenifrf(rz)thenal=rz
   1925 tx=px(al)+(pw(al)-3)*4:ap=.:return
-  1950 rem float autopilot: ballistic run at the pad, then one late braking burn
+  1950 rem float autopilot: cross high, release into a dive, then one late burn
   1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
   1952 ae=tx-pp:ife2thenae=ae-256
-  1953 aa=abs(ae):ah=int(sqr(8*aa)):ifah>16thenah=16
-  1954 ifaa<6thenah=.
-  1955 ifae<.thenah=-ah
-  1956 ifpy(al)-po<=(m2-3)*(m2+8)/24+4thenap=1
-  1957 av=60:ifapthenav=3
- 1970 jt=16:ifm2>avthenjt=.
- 1971 jv=15+jt
- 1972 ifhm<ahthenifp<>188thenjv=7+jt:goto170
- 1973 ifhm<ahthenjv=15:goto170
- 1974 ifhm>ahthenifp<>194thenjv=11+jt:goto170
- 1975 ifhm>ahthenjv=15:goto170
- 1976 ifp=188orp=189thenjv=11+jt:goto170
- 1977 ifp<>187thenjv=7+jt
-  1978 goto170
+  1953 aa=abs(ae):ag=py(al)-po:ifag<1thenag=1
+  1954 ifap=.thenifaa<=90thenifag<=(m2-3)*(m2+8)/24+4thenap=1
+  1955 av=60:ifapthenav=3
+  1956 ifap=.thenifaa>90thenifpo>60thenav=.
+  1957 ah=int(sqr(8*aa))
+  1958 ifaa>90then1962
+  1959 ab=int(aa*m2/(5*ag)):ifm2<1thenab=16
+  1960 ifab<5thenab=5
+  1961 ifab<ahthenah=ab
+  1962 ifah>16thenah=16
+  1963 ifaa<6thenah=.
+  1964 ifae<.thenah=-ah
+  1965 ifm2<-2thenah=hm
+  1966 jt=16:ifm2>avthenjt=.
+  1967 jv=15+jt:dh=ah-hm
+  1968 ifdh>.thenifp<>188thenjv=7+jt:goto170
+  1969 ifdh>.thenjv=15:goto170
+  1970 ifdh<.thenifp<>194thenjv=11+jt:goto170
+  1971 ifdh<.thenjv=15:goto170
+  1972 ifp=188orp=189thenjv=11+jt:goto170
+  1973 ifp<>187thenjv=7+jt
+  1974 goto170
   1980 ifz$="{rght}"thenjv=(jvand16)+7
   1982 ifz$="{down}"thenjv=(jvand16)+11
   1984 return
