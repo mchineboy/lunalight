@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Install C64 build tools
+        run: |
+          sudo add-apt-repository --yes multiverse
+          sudo apt-get update
+          sudo apt-get install --yes cc65 vice xvfb
+
+          # Debian removes the ROM data required by VICE. Restore the data from
+          # the matching official upstream source release.
+          curl --fail --location --silent --show-error \
+            https://sourceforge.net/projects/vice-emu/files/releases/vice-3.7.1.tar.gz/download \
+            --output /tmp/vice.tar.gz
+          mkdir -p /tmp/vice-source "$HOME/.local/share/vice"
+          tar -xzf /tmp/vice.tar.gz -C /tmp/vice-source --strip-components=1
+          cp -R /tmp/vice-source/data/. "$HOME/.local/share/vice/"
+
+      - name: Verify canonical build
+        run: xvfb-run --auto-servernum make verify-blitz-gameplay
