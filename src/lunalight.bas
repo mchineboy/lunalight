@@ -168,19 +168,23 @@
   1198 fh=99+fm:fy=py(rz)-7:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
   1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,14:pokev+23,.:pokev+28,.
-  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or128:return
+  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or128
+  1213 rem line 720 clears the lander x-msb; restore it so it stays on the pad
+  1214 ife2thenpokev+16,peek(v+16)or1
+  1215 return
   1270 getz$
   1280 ifz$="{f1}"thenpoke33792,160:poke55296,0:goto200
   1290 ifz$="{f7}"then20
   1300 ifz$="{home}"thenprintrv$;:stop
   1310 goto1270
-  1320 pokes+4,128:forss=1to4:pokev+42+ss,7:next:pp=int(pp):pr=pp:pl=pp:cr=1
-  1325 pokepn+4,203:pokepn+5,213:pokepn+6,223:pokepn+7,233
-  1330 ifpp+12>255thenpokev+16,96:pr=pp-256
-  1340 pokev+10,pr+12:pokev+9,po-10:pokev+12,pr+12:pokev+15,po+10
-  1350 ifpeek(v+16)<>.thenifpp-12<.thenpokev+16,96:pl=256+pp:goto1370
-  1360 ifpp-12<.thenpl=15
-  1370 pokev+14,pl-12:pokev+13,po+10:pokev+8,pl-12:pokev+11,po-10:pokev+21,252
+ 1320 pokes+4,128:forss=1to4:pokev+42+ss,7:next:pp=int(pp):pr=pp+12:pl=pp-12:cr=1
+ 1325 pokepn+4,203:pokepn+5,213:pokepn+6,223:pokepn+7,233
+ 1328 ife2thenpr=pr+256:pl=pl+256
+ 1330 xb=.:ifpr>255thenpr=pr-256:xb=96
+ 1340 pokev+10,pr:pokev+9,po-10:pokev+12,pr:pokev+15,po+10
+ 1350 ifpl>255thenpl=pl-256:xb=xb+144
+ 1360 ifpl<.thenpl=3
+ 1370 pokev+16,xb:pokev+14,pl:pokev+13,po+10:pokev+8,pl:pokev+11,po-10:pokev+21,252
   1380 pokev+28,240:pokev+37,11:pokev+38,2:pokev+39,0:pokev+40,0
   1390 forex=203to212:pokepn+4,ex:pokepn+5,ex+10:pokepn+6,ex+20:pokepn+7,ex+30
   1400 pokes+24,212-ex:pokes+4,129:pokes+5,15:pokes+1,5:pokes,20:ford=1to100:next:nextex
@@ -207,24 +211,14 @@
   1923 ifal=akthenal=al+1:ifal>5thenal=1
   1924 ak=al:iffe<400thenifrf(rz)thenal=rz
   1925 tx=px(al)+(pw(al)-3)*4:ap=.:return
-  1950 rem float autopilot: swoop across high, then settle and descend
+  1950 rem float autopilot: ballistic run at the pad, then one late braking burn
   1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
   1952 ae=tx-pp:ife2thenae=ae-256
-  1953 aa=abs(ae):ah=.:ifaa>.thenah=1
-  1954 ifaa>12thenah=2
-  1955 ifaa>24thenah=4
-  1956 ifaa>48thenah=8
-  1957 ifaa>96thenah=12
-  1958 ifae<.thenah=-ah
-  1959 ifapthenifaa<1thenah=.
-  1960 ifapthen1964
-  1961 av=.:ifpo<70thenav=4
-  1962 ifpo>90thenav=-2
-  1963 ifae<=.thenifae>-1thenifhm=.thenap=1
-  1964 ifap=.then1970
-  1965 ag=py(al)-po:av=12:ifag<60thenav=8
-  1966 ifag<25thenav=4
-  1967 ifag<12thenav=1
+  1953 aa=abs(ae):ah=int(sqr(8*aa)):ifah>16thenah=16
+  1954 ifaa<6thenah=.
+  1955 ifae<.thenah=-ah
+  1956 ifpy(al)-po<=(m2-3)*(m2+8)/24+4thenap=1
+  1957 av=60:ifapthenav=3
  1970 jt=16:ifm2>avthenjt=.
  1971 jv=15+jt
  1972 ifhm<ahthenifp<>188thenjv=7+jt:goto170

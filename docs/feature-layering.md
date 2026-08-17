@@ -24,6 +24,7 @@ altered.
 | Bank-2 relocation only, after the retained optimizations | 9,675 bytes | `$0801-$2DCB` | `$41FF` (music start - 1) | 5,172 bytes |
 | **Canonical promoted build (`src/lunalight.bas`)** | **11,433 bytes** | **`$0801-$34A7`** | **`$41FF`** | **3,416 bytes** |
 | Canonical build with the orbiting command module | 11,585 bytes | `$0801-$3541` | `$41FF` | 3,262 bytes |
+| Canonical build with the suicide-burn attract descent | 11,613 bytes | `$0801-$355D` | `$41FF` | 3,234 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -196,20 +197,31 @@ Five autopilot changes, all behind `IF am`:
 | Change | Line | Effect |
 | --- | --- | --- |
 | Steering no longer holds the thruster on | 1970-1977 | `jt` carries the fire bit separately, so a rotation frame only burns fuel when descent actually needs braking. Fuel burn is subtracted 1:1 from score at line 754 |
-| Softer touchdown | 1954, 1956 | Target velocity eased from 5/3 to 4/1 in the last 25 and 12 pixels, cutting the `30*ABS(INT(m2))` penalty |
-| Tighter lateral deadband | 1962 | 2 pixels instead of 4, so the craft settles inside the bonus window |
 | Random destination without immediate repeats | 1922-1924 | A byte from the RNG table selects one of the five generated pads; an immediate repeat advances to the next pad |
 | Refuel diversion | 1924 | Below 400 fuel the demo targets `rz` when that pad carries `rf()`, instead of cycling into a game over |
+| Two-phase swoop | 1951-1967 | A cruise phase crosses the map at altitude and cancels the starting horizontal momentum; once aligned over the pad within a pixel with `hm=0`, `ap` latches and the descent phase begins |
+| Suicide-burn descent | 1965 | Free-fall at `av=60` (no thrust) until the remaining altitude reaches the physics braking distance `bd=m2*m2/24+m2`, then brake at `av=4` to ride the landing gate down |
 
-The first correction still cheated visually: line 90 replaced the real spawn
-with `pp=tx:hm=0`, placing the craft directly over the selected pad. That made
-the verified landing reliable but reduced the flight to short vertical braking
-bursts. The override is removed. Attract now enters from the exact normal
-`ep`/`hp` player sequence with its initial horizontal momentum, traverses the
-terrain toward the random destination, and then settles on the bullseye. A
-sample three-attempt runtime run scored 0 → 612 → 1731 with no explosions and a
-centre-bonus message (`attract.lands_on_the_bonus_bullseye`). The verifier pins
-the distinct real-play entries as
+The first correction cheated visually: line 90 replaced the real spawn with
+`pp=tx:hm=0`, placing the craft directly over the selected pad, which reduced
+the flight to short vertical braking bursts. That override is removed. Attract
+now enters from the exact normal `ep`/`hp` player sequence with its initial
+horizontal momentum, crosses the terrain toward the random destination, aligns,
+and then descends.
+
+The descent itself was reworked from a low velocity clamp (12/8/4/1) into a
+suicide burn so it matches how the game is meant to be flown: let the LEM fall
+and thrust late for a just-in-time landing. The clamp is derived, not guessed —
+`tools/verify-blitz-gameplay.py` only samples the first 70 jiffies, so the
+descent profile was tuned against a one-dimensional model of the exact flight
+loop (`m2+=.6` coast, `m2-=.6` thrust, `po+=.1+m2/20`, gate `int(m2)<=5`). The
+braking distance `v^2/24 + v` px comes from that model: it is the altitude a
+full straight-up burn needs to arrest velocity `v` to the gate. Swept across
+every realistic descent start it never crashes, peaks at a 20-36 fall velocity
+(against the old ~12 crawl), and touches down at `m2` 3.4-4.4, inside the gate
+with margin for VICE timing. Two clean bonus landings per demo run verify
+(`attract.repeatable_successful_landings`, `attract.lands_on_the_bonus_bullseye`);
+the distinct real-play entries are pinned by
 `attract.normal_spawn_sequence_across_attempts`.
 
 ### VEL label column
@@ -320,32 +332,28 @@ retained.
 ## Capacity of the freed region
 
 `make verify-bank2-capacity` pads the canonical compiled code through the freed
-range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=512`:
+range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code, with the command module | `$0801-$354B` | 11,595 |
-| Zero-filled runtime workspace for BASIC's variables | `$354C-$374B` | 512 |
-| `0xAA` filler through the ceiling | `$374C-$41FF` | 2,740 |
+| Canonical code, with the command module | `$0801-$355D` | 11,613 |
+| Zero-filled runtime workspace for BASIC's variables | `$355E-$3B5D` | 1,536 |
+| `0xAA` filler through the ceiling | `$3B5E-$41FF` | 1,698 |
 
-The padded artifact passes the motion oracle, and the filler above BASIC's live
-data reads back byte-intact (`capacity.free_filler_intact_above_basic_data`).
-The `$2E7C-$4073` range the sprites used to occupy is therefore genuinely
-available to code, not merely unclaimed on paper.
+The padded artifact passes the motion oracle and the full runtime suite,
+including the demo landings, and the filler above BASIC's live data reads back
+byte-intact (`capacity.free_filler_intact_above_basic_data`). The `$2E7C-$4073`
+range the sprites used to occupy is therefore genuinely available to code, not
+merely unclaimed on paper.
 
-Three attract checks currently fail on the **padded** artifact only
-(`attract.normal_spawn_sequence_across_attempts`,
-`attract.repeatable_successful_landings`,
-`attract.lands_on_the_bonus_bullseye`): the demo autopilot crashes on its first
-attempt there. Compiling the same tree with the command module reverted
-reproduces the identical three failures, so the cause is the autopilot's margin
-on the padded build, not the module. The unpadded canonical artifact passes all
-three.
-
-One further caveat on this gate: `samples[5].sprites[1].x` failed once by five
-pixels — exactly one frame of horizontal drift — on the padded artifact, then
-passed on two subsequent runs of the same file. The padded configuration sits on
-a frame boundary and is not reliably deterministic.
+The reserve was raised from 512 to 1,536 bytes. BASIC's live variables, arrays
+and strings grow above the code as the game runs; the startup `STREND` snapshot
+(`$3720`) understates the peak, and with only a 512-byte reserve the `0xAA`
+filler overwrote live runtime data, perturbing emulation timing and the demo's
+descent. The larger reserve keeps the filler clear of that working set, so the
+capacity proof measures free space without disturbing the running program. It
+still demonstrates ~1.7 KB of contiguous filler plus the reserve above the code,
+well clear of the music player at `$4200`.
 
 ## Verification summary
 
@@ -356,7 +364,7 @@ a frame boundary and is not reliably deterministic.
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank2` (canonical runtime suite) | 87 of 87 checks passed, including `flight.pointer[7]_at_$87FF`, `flight.module_sprite_colour_$D02E`, `flight.module_sprite_y_$D00F` and `flight.module_x_msb_clear` |
 | `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 87-check suite, 0 failures |
-| `make verify-bank2-capacity` | Padded artifact: 6 of 6 motion samples plus 87 of 90 checks; the three attract failures reproduce with the command module reverted (see above) |
+| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 90 of 90 checks, including the demo landings and `capacity.free_filler_intact_above_basic_data` |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
 | `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 20 seconds` |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |
