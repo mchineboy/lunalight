@@ -457,6 +457,19 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         "metadata (px/pw/py/pb/rf) and float velocity threshold 5",
     )
 
+    # Line 720 is held byte-identical to the bank-0 fallback, and it writes
+    # $D010=fm, which clears the lander's X-MSB. A craft that touched down past
+    # sprite X 255 (e2=1) would therefore jump 256 pixels left off its pad. The
+    # bit is restored in the bank-2-only module routine that 720 gosubs.
+    msb_restore = "ife2thenpokev+16,peek(v+16)or1"
+    report.check(
+        "landing.lander_x_msb_restored_on_pad",
+        1214 in variant and _normalize(msb_restore) in _normalize(variant[1214]),
+        {"line_1214": variant.get(1214)},
+        "the successful-landing path restores the lander's X-MSB so a craft that "
+        "lands past sprite X 255 stays on its pad instead of snapping 256px left",
+    )
+
     # Scoring arithmetic shared with the bank-0 fallback (velocity, tilt and fuel
     # penalties plus the running total) must remain byte-identical.
     canonical = source_lines(args.canonical_source) if args.canonical_source else {}

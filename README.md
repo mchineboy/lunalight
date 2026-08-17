@@ -2,6 +2,8 @@
 
 Commodore 64 lunar lander by Steven Hardison (public domain).
 
+![Lunalight title screen and attract-mode landing](docs/lunalight-gameplay.gif)
+
 Canonical playable path: **`src/lunalight.bas`** compiled with Dad’s original
 **Blitz!** disk [`tools/BLITZ.d64`](tools/BLITZ.d64), producing
 [`build/lunalight-blitz-full.prg`](build/lunalight-blitz-full.prg). Physics remain
@@ -106,6 +108,7 @@ make d64             # build/lunalight.d64 — self-contained canonical full PRG
 make d64-boot        # directory listing + headless boot screenshot of that disk
 make smoke           # warp headless title screenshot of the canonical artifact
 make bench           # normal-speed run of the canonical artifact
+make gif             # regenerate docs/lunalight-gameplay.gif (title + attract)
 make clean
 ```
 
@@ -254,6 +257,7 @@ position drift, not subjective handling.
 | [`tools/vice_monitor.py`](tools/vice_monitor.py) | Shared VICE monitor helpers |
 | [`tools/embed-sprites.py`](tools/embed-sprites.py) | Merge PRG + address-sorted asset PRGs |
 | [`tools/attract-sim.py`](tools/attract-sim.py) | Python sim of the attract/terrain path |
+| [`tools/make-gameplay-gif.py`](tools/make-gameplay-gif.py) | Capture the README title+attract GIF via VICE’s binary monitor |
 | [`tools/readscreen.py`](tools/readscreen.py) | Decode VICE screenshots via character ROM |
 
 Note: the lander collides with any character on screen; debug text below row 7

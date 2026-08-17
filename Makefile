@@ -106,9 +106,12 @@ SMOKE_CYCLES ?= 135000000
 # dump device does not throttle to 100%, so the measured wall time is ~100s.
 BENCH_CYCLES ?= 200000000
 
+GIF := docs/lunalight-gameplay.gif
+GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
+
 .PHONY: all prg full run run-blitz run-basic run-mospeed smoke bench clean \
 	blitz blitz-bank2 run-bank2 blitz-bank0 run-bank0 reblitz mospeed \
-	d64 d64-boot d64-mospeed \
+	d64 d64-boot d64-mospeed gif \
 	verify-baseline record-blitz-baseline verify-blitz-gameplay verify-blitz-motion \
 	verify-bank0-motion verify-bank2-motion verify-bank2 verify-bank2-capacity \
 	bank2-capacity
@@ -131,6 +134,12 @@ mospeed: $(MOSPEED_FULL)
 d64: $(D64)
 
 d64-mospeed: $(D64_MOSPEED)
+
+# Title then attract-mode autopilot; regenerates the README gameplay GIF.
+gif: $(GIF)
+
+$(GIF): $(BLITZ_FULL) $(GIF_DRIVER) $(TOOLS_DIR)/vice_monitor.py
+	$(PYTHON) $(GIF_DRIVER) --prg $(BLITZ_FULL) --output $@
 
 verify-baseline:
 	@set -eu; \
