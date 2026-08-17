@@ -27,6 +27,7 @@ altered.
 | Canonical build with the suicide-burn attract descent | 11,613 bytes | `$0801-$355D` | `$41FF` | 3,234 bytes |
 | Canonical build with the dive-and-burn attract descent | 11,676 bytes | `$0801-$359A` | `$41FF` | 3,173 bytes |
 | Canonical build with four-cell pads, slope glyphs and the 3:1 demo cadence | 11,793-byte PRG | `$0801-$360F` | `$41FF` | 3,056 bytes |
+| Canonical build with the per-round string collection in line 840 | 11,804-byte PRG | `$0801-$361A` | `$41FF` | 3,045 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -377,9 +378,54 @@ sprite/background collision latch that gates landing.
 The sprite payload occupies `$AE7C-$C073`, whose tail runs past the `$BFFF` bank
 edge; every pointer the game uses spans `$AEC0-$BFBF`, inside the bank
 (`static.used_pointer_blocks_inside_vic_bank`). BASIC's variables and arrays live
-above the code (`VARTAB $3207`, `ARYTAB $3468`, `STREND $362A`) and string space
+above the code (`VARTAB $336D`, `ARYTAB $361B`, `STREND $37DD`) and string space
 stays below the relocated sprites (`FRETOP $9FFF`, `MEMSIZ $A000` —
 `capacity.string_space_below_relocated_sprites`).
+
+### The screen matrix sits inside the string heap
+
+Relocating the screen to `$8400` put it directly in the path BASIC's string heap
+walks down from `MEMSIZ $A000`. Each round permanently orphans a few dozen bytes
+of heap through the message concatenations in lines 775, 778 and the post-mortem
+lines 1908/1912/1918, so `FRETOP` descends monotonically.
+
+BASIC's own collector cannot rescue this. It only triggers when `FRETOP` meets
+`STREND`, which is `$37DD` — below the RNG buffer at `$4800`, the RNG code at
+`$4400` and the music player at `$4200`. The heap therefore reaches the screen
+matrix, 6,144 bytes down, long before any automatic collection.
+
+Measured on an unattended attract run of the pre-fix canonical PRG, sampling
+`FRETOP` at `$33/$34`:
+
+| C64 elapsed | `FRETOP` | Heap consumed |
+| --- | --- | --- |
+| 157 s | `$9FD5` | 43 B |
+| 1,568 s | `$98D5` | 1,835 B |
+| 2,284 s | `$95FC` | 2,564 B |
+| 5,455 s | `$87FF` | 6,145 B — enters the screen matrix |
+| 5,884 s | `$83D1` | 7,215 B — fell clean through it |
+
+Roughly 1.3 bytes per second of demo, never reclaimed, with visible corruption
+after about 90 minutes of continuous attract. The symptom is distinctive: string
+bodies land in screen RAM, so digits render as digits while letters render as
+graphics glyphs, and the leaked `str$` score values are legible in the wreckage.
+The sprite pointers at `$87F8` are inside the same page, so the earth decoration
+(pointers 253/254) degrades into noise as the heap crosses them.
+
+Line 840 fixes it with one forced collection per round — `gc=fre(.)` — placed in
+the between-round settle, outside the flight loop, where the existing 200-iteration
+delay hides the collector's pause. Cost: 11 bytes of compiled code. There are only
+ten string descriptors and no string arrays, so the collection is cheap.
+
+Seeding `FRETOP` to `$8900` and running the demo shows the heap hauled back to
+`$9FF4` within a single round, then pinned there: across 200 seconds of warped
+attract it oscillated only between `$9FC3` and `$A000`, a working set of about 60
+bytes. Two checks in the attract phase pin this — `strings.heap_reclaimed_between_rounds`
+and `strings.heap_clear_of_screen_matrix`.
+
+This hazard is specific to bank 2. In `src/lunalight-bank0.bas` the screen is at
+`$0400`, far below the heap's floor, so the fallback collects normally and needs
+no equivalent.
 
 ## Optimization experiments (bank-2 relocation era)
 
@@ -403,9 +449,9 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code | `$0801-$360F` | 11,791 loaded bytes |
-| Zero-filled runtime workspace for BASIC's variables | `$3610-$3C0F` | 1,536 |
-| `0xAA` filler through the ceiling | `$3C10-$41FF` | 1,520 |
+| Canonical code | `$0801-$361A` | 11,802 loaded bytes |
+| Zero-filled runtime workspace for BASIC's variables | `$361B-$3C1A` | 1,536 |
+| `0xAA` filler through the ceiling | `$3C1B-$41FF` | 1,509 |
 
 The padded artifact passes the motion oracle and the full runtime suite,
 including the demo landings, and the filler above BASIC's live data reads back
@@ -429,9 +475,10 @@ well clear of the music player at `$4200`.
 | `make verify-baseline` | Exact byte match: `src/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 91 of 91 checks passed, including four-cell pad geometry, three clean approaches, and the deliberately failed fourth approach |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 91-check suite, 0 gameplay failures |
-| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 94 of 94 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
+| `make verify-bank2` (canonical runtime suite) | 93 of 93 checks passed, including four-cell pad geometry, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 93-check suite, 0 gameplay failures |
+| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 96 of 96 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
+| Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
 | `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 20 seconds` |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |

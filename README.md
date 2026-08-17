@@ -202,11 +202,13 @@ CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`–`$360F` | Blitz machine code (11,793-byte PRG for the promoted source) |
-| `$3610`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,056 bytes of headroom to the music player |
+| `$0801`–`$361A` | Blitz machine code (11,804-byte PRG for the promoted source) |
+| `$361B`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,045 bytes of headroom to the music player |
 | `$4200`–`$43E5` | Three-voice title soundtrack player; 26 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
+| `$8400`–`$87FF` | Screen matrix and sprite pointers, also seen by the VIC below |
+| `$9FFF` downward | BASIC string heap (`MEMSIZ $A000`). The screen lies in its descent path and `STREND` is too low for BASIC to collect on its own, so line 840 forces one collection per round with `gc=fre(.)` |
 | `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244 |
 
 What the VIC sees in bank 2 (`$8000-$BFFF`):
@@ -233,7 +235,7 @@ The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
 
 1. `make verify-baseline` — exact tokenized match for the frozen `luna081426` text.
 2. `make` / `make blitz` — original compiler disk → `lunalight-blitz.prg` → embed music, RNG and rebased flag sprites → `lunalight-blitz-full.prg`.
-3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, the single-line crash post-mortem, attract mode with repeatable autopilot landings, and a bank-0 control descent).
+3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, the single-line crash post-mortem, attract mode with repeatable autopilot landings, string-heap reclamation between rounds, and a bank-0 control descent).
 4. `make verify-bank2-capacity` — proves the freed region is genuinely usable: the padded artifact still passes the motion oracle and the suite, and the filler above BASIC’s live data is byte-intact.
 5. `make smoke` / `make bench` — title screenshots of the canonical artifact.
 6. `make d64` / `make d64-boot` — package `build/lunalight.d64` (one 186-block `lunalight` PRG, 478 blocks free) and boot it headless; the exit screenshot decodes to the title screen.

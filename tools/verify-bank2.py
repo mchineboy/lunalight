@@ -849,6 +849,20 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         previous_y = vic[1]
         attempt_exploded = False
 
+        # The bank-2 screen matrix sits inside the string heap's descent path,
+        # and BASIC's own collector cannot rescue it: STREND lies below the
+        # music player, so the heap would cross the screen, the RNG buffer and
+        # the player before an automatic collection ever triggered. Line 840
+        # therefore forces one collection per round. Seed FRETOP next to the
+        # screen and require the demo to haul it back.
+        heap_seed = session.screen_base + 0x0500
+        zp = monitor.memory_paused(0x33, 0x38)
+        memsiz = zp[4] | zp[5] << 8
+        monitor.set_memory(0x33, bytes((heap_seed & 0xFF, heap_seed >> 8)))
+        monitor.resume()
+        heap_low = heap_seed
+        heap_high = heap_seed
+
         deadline = time.monotonic() + args.attract_timeout
         # Observe four complete approaches: the demo deliberately centres the
         # first three and aims outside the pad on the fourth. Reaching a fifth
@@ -856,7 +870,11 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         while time.monotonic() < deadline and (successes < 2 or len(starts) < 5):
             screen = session.screen()
             vic = monitor.memory_paused(0xD000, 0xD02F)
+            heap = monitor.memory_paused(0x33, 0x34)
             monitor.resume()
+            fretop = heap[0] | heap[1] << 8
+            heap_low = min(heap_low, fretop)
+            heap_high = max(heap_high, fretop)
             high, score, lems = status_values(screen)
             if high is not None:
                 highs.add(high)
@@ -951,6 +969,20 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         )
         report.equal("attract.demo_never_updates_high_score", sorted(highs), [0])
         report.check(
+            "strings.heap_reclaimed_between_rounds",
+            heap_high >= memsiz - 0x0100,
+            f"FRETOP seeded ${heap_seed:04X}, recovered to ${heap_high:04X}, "
+            f"MEMSIZ ${memsiz:04X}",
+            "a round returns the string heap to within 256 bytes of MEMSIZ",
+        )
+        report.check(
+            "strings.heap_clear_of_screen_matrix",
+            heap_low > session.screen_base + 0x03FF,
+            f"lowest FRETOP ${heap_low:04X}, screen matrix "
+            f"${session.screen_base:04X}-${session.screen_base + 0x03FF:04X}",
+            "string allocations never descend into the screen matrix",
+        )
+        report.check(
             "attract.final_input_exit_returns_to_title",
             all(needle in final_title_text for needle in TITLE_NEEDLES),
             [line for line in final_title if line.strip()],
@@ -962,6 +994,12 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             "explosions": explosions,
             "centre_bonus_seen": bonus_seen,
             "high_scores_seen": sorted(highs),
+            "string_heap": {
+                "seeded_fretop": f"${heap_seed:04X}",
+                "lowest_fretop": f"${heap_low:04X}",
+                "highest_fretop": f"${heap_high:04X}",
+                "memsiz": f"${memsiz:04X}",
+            },
         }
     finally:
         monitor.set_joyport(1, 0x1F)

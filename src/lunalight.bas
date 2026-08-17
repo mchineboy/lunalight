@@ -102,7 +102,8 @@
   792 ifnfthenifamthenpt=.:nm=4:nf=.:fe=1000:goto835
   795 ifnfgoto982
   835 ifamthengosub1920
-  840 tp=.:fu=fe:bs=.:forx=1to200:next:goto90
+  839 rem screen sits at $8400 inside the string heap's descent; collect here
+ 840 tp=.:fu=fe:bs=.:gc=fre(.):forx=1to200:next:goto90
   900 rv=peek(rb+ri):ri=ri+1:return
   960 getz$
   970 ifz$="{f7}"thenpt=.:tp=.:nm=4:nf=.:fe=1000:n2=25:gosub986:gosub1100:goto840
