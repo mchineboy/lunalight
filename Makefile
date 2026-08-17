@@ -8,15 +8,17 @@ NODE   ?= node
 JAVA   ?= java
 
 SRC_DIR   := src
+ARCHIVE_DIR := archived
 BUILD_DIR := build
 TOOLS_DIR := tools
 
 # Canonical source: the promoted VIC-bank-2 feature build (music, RNG,
 # procedural terrain, refuel flag, joystick, crash text, attract mode).
 SRC_CANONICAL := $(SRC_DIR)/lunalight.bas
-# Runnable fallback: the pre-promotion bank-0 source, kept byte-for-byte. It is
-# also the control the promoted build is compared against.
-SRC_BANK0     := $(SRC_DIR)/lunalight-bank0.bas
+# Archived runnable fallback: the pre-promotion bank-0 source, kept
+# byte-for-byte as the control the promoted build is compared against.
+SRC_BANK0     := $(ARCHIVE_DIR)/lunalight-bank0.bas
+SRC_BASELINE  := $(ARCHIVE_DIR)/luna081426.bas
 
 # Reblitz64: host-side JavaScript port of the Blitz!/Austro-Speed BASIC compiler.
 # EXPERIMENTAL. Overruns the bank-0 sprite region; not used for any package.
@@ -56,14 +58,16 @@ BANK2_CAPACITY_REPORT := $(BUILD_DIR)/bank2-capacity.json
 BANK2_RUNTIME_RESERVE ?= 1536
 
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
-# Alternate toolchain bound to the bank-0 source: its memholes and
-# patch-assets.py place bank-0 assets at $2E7C/$4200/$4400. No bank-2 parity.
+# It compiles the canonical source and reserves the canonical bank-2 asset
+# ranges so patch-assets.py can produce one LOAD",8,1" image.
 MOSPEED_JAR ?= $(TOOLS_DIR)/mospeed/basicv2.jar
 MOSPEED_URL ?= https://github.com/EgonOlsen71/basicv2/raw/master/dist/basicv2.jar
-# Locked regions matching embed layout: sprites $2E7C-$4073, music+rng $4200-$4BFF
-MOSPEED_MEMHOLE := $$2E7C-$$4073,$$4200-$$4BFF
-MOSPEED_PRG := $(BUILD_DIR)/lunalight-bank0-mospeed.prg
-MOSPEED_FULL := $(BUILD_DIR)/lunalight-bank0-mospeed-full.prg
+# Locked regions matching canonical layout: music/RNG $4200-$4BFF and rebased
+# sprites $AE7C-$C073.
+MOSPEED_MEMHOLE := $$4200-$$4BFF,$$AE7C-$$C073
+MOSPEED_PRG := $(BUILD_DIR)/lunalight-mospeed.prg
+MOSPEED_ASSETS := $(BUILD_DIR)/lunalight-mospeed-assets.prg
+MOSPEED_FULL := $(BUILD_DIR)/lunalight-mospeed-full.prg
 
 # Sprite shapes for pointers 187-194/203-212/253/254
 SPRITES := sprites/lsprite.prg
@@ -85,15 +89,15 @@ RNG_CFG   := $(TOOLS_DIR)/rng.cfg
 RNG_OBJ   := $(BUILD_DIR)/rng.o
 RNG_PRG   := $(BUILD_DIR)/rng.prg
 
-# Tokenized BASIC for both lineages.
+# Tokenized BASIC for the canonical source and archived bank-0 control.
 BASIC_PRG := $(BUILD_DIR)/lunalight.prg $(BUILD_DIR)/lunalight-bank0.prg
 # Interpreted BASIC V2 + assets is a bank-0-only alternate (bank-0 asset layout).
 FULL_PRG  := $(BUILD_DIR)/lunalight-bank0-full.prg
 
 # Canonical disk: self-contained promoted original-Blitz full PRG.
 D64 := $(BUILD_DIR)/lunalight.d64
-# Alternate MOSpeed multi-file disk (former default d64 output), bank-0 lineage.
-D64_MOSPEED := $(BUILD_DIR)/lunalight-bank0-mospeed.d64
+# Alternate canonical-source MOSpeed disk.
+D64_MOSPEED := $(BUILD_DIR)/lunalight-mospeed.d64
 
 # The canonical image spans $0801-$C073, so a single ",8,1" load moves ~47KB over
 # the serial bus: measured still loading at 110,000,000 cycles and showing the
@@ -145,7 +149,7 @@ verify-baseline:
 	@set -eu; \
 	tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/lunalight-roundtrip.XXXXXX"); \
 	trap 'rm -rf "$$tmpdir"' EXIT; \
-	$(PETCAT) -w2 -o "$$tmpdir/luna081426" -- $(SRC_DIR)/luna081426.bas; \
+	$(PETCAT) -w2 -o "$$tmpdir/luna081426" -- $(SRC_BASELINE); \
 	cmp current/luna081426 "$$tmpdir/luna081426"; \
 	echo "verify-baseline: exact byte match"
 
@@ -153,6 +157,9 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(BUILD_DIR)/%.prg: $(SRC_DIR)/%.bas | $(BUILD_DIR)
+	$(PETCAT) -w2 -o $@ -- $<
+
+$(BUILD_DIR)/lunalight-bank0.prg: $(SRC_BANK0) | $(BUILD_DIR)
 	$(PETCAT) -w2 -o $@ -- $<
 
 $(MUSIC_OBJ): $(MUSIC_SRC) | $(BUILD_DIR)
@@ -351,27 +358,32 @@ $(MOSPEED_JAR):
 	mkdir -p $(dir $@)
 	curl -fsSL -o $@ $(MOSPEED_URL)
 
-$(MOSPEED_PRG): $(SRC_BANK0) $(MOSPEED_JAR) | $(BUILD_DIR)
+$(MOSPEED_PRG): $(SRC_CANONICAL) $(MOSPEED_JAR) | $(BUILD_DIR)
 	$(JAVA) -cp $(MOSPEED_JAR) com.sixtyfour.cbmnative.shell.MoSpeedCL \
 		$< \
 		/target=$@ \
 		/compactlevel=4 \
 		'/memhole=$(MOSPEED_MEMHOLE)'
 
-$(MOSPEED_FULL): $(MOSPEED_PRG) $(SPRITES_OUT) $(MUSIC_PRG) $(RNG_PRG) $(TOOLS_DIR)/patch-assets.py
-	$(PYTHON) $(TOOLS_DIR)/patch-assets.py $< $(SPRITES_OUT) $(MUSIC_PRG) $(RNG_PRG) $@
+$(MOSPEED_ASSETS): $(MOSPEED_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TOOLS_DIR)/patch-assets.py
+	$(PYTHON) $(TOOLS_DIR)/patch-assets.py $< $(MUSIC_PRG) $(RNG_PRG) $@
+
+# MOSpeed's image ends below the VIC-bank-2 sprite region, so append the
+# rebased segment after filling the lower memory holes.
+$(MOSPEED_FULL): $(MOSPEED_ASSETS) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $< $(SPRITES_BANK2_SHAPES) $@
 
 # Canonical disk: self-contained promoted original-Blitz full PRG (LOAD"*",8,1 / RUN).
 $(D64): $(BLITZ_FULL)
 	$(C1541) -format "lunalight,24" d64 $@ \
 		-write $(BLITZ_FULL) lunalight
 
-# Alternate MOSpeed disk (former default): bank-0 compiled PRG + tokenized
-# bank-0 source + assets.
-$(D64_MOSPEED): $(MOSPEED_FULL) $(BUILD_DIR)/lunalight-bank0.prg $(MUSIC_PRG) $(RNG_PRG)
+# Alternate MOSpeed disk: canonical compiled PRG + canonical tokenized source
+# and machine-code helpers.
+$(D64_MOSPEED): $(MOSPEED_FULL) $(BUILD_DIR)/lunalight.prg $(MUSIC_PRG) $(RNG_PRG)
 	$(C1541) -format "lunalight,24" d64 $@ \
 		-write $(MOSPEED_FULL) lunalight \
-		-write $(BUILD_DIR)/lunalight-bank0.prg lunalight.bas \
+		-write $(BUILD_DIR)/lunalight.prg lunalight.bas \
 		-write $(MUSIC_PRG) music \
 		-write $(RNG_PRG) rng
 

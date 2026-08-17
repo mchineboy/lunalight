@@ -17,8 +17,10 @@ three-voice title soundtrack, the TOD-entropy RNG, procedural terrain with
 generated landing pads, the refuel-pad flag sprite, joystick port 2 with keyboard
 fallback, the crash post-mortem text, and attract mode.
 
-A runnable fallback remains: **`src/lunalight-bank0.bas`** is the exact
-pre-promotion bank-0 source, built by `make blitz-bank0`.
+A runnable fallback remains: **`archived/lunalight-bank0.bas`** is the exact
+pre-promotion bank-0 source, built by `make blitz-bank0`. It is outside `src/`
+so that directory contains only the current canonical source and its active
+assembly helpers.
 
 Layer evidence and measured results:
 [`docs/feature-layering.md`](docs/feature-layering.md).
@@ -27,20 +29,20 @@ Layer evidence and measured results:
 
 | File | Role |
 | ---- | ---- |
-| [`src/luna081426.bas`](src/luna081426.bas) | Exact detokenized `luna2` baseline; `make verify-baseline` retokenizes to byte-identical [`current/luna081426`](current/luna081426) |
 | [`src/lunalight.bas`](src/lunalight.bas) | **Canonical** promoted bank-2 feature build (formerly `src/lunalight-bank2.bas`, now folded in so only one canonical source exists) |
-| [`src/lunalight-bank0.bas`](src/lunalight-bank0.bas) | **Fallback**: the exact pre-promotion bank-0 canonical source (baseline plus correctness fixes and IRQ music). Also the control the promoted build is verified against |
-| [`src/lunalight-optimized.bas`](src/lunalight-optimized.bas) | Prior evolved source (fixed-point physics, Mars, etc.) — reference only |
+| [`src/music.s`](src/music.s) | Three-voice IRQ title soundtrack (embedded at `$4200`) |
+| [`src/rng.s`](src/rng.s) | TOD-entropy collector and PRNG table at `$4400-$4BFF`; **used** by the canonical package for terrain generation |
+| [`archived/luna081426.bas`](archived/luna081426.bas) | Exact detokenized `luna2` baseline; `make verify-baseline` retokenizes to byte-identical [`current/luna081426`](current/luna081426) |
+| [`archived/lunalight-bank0.bas`](archived/lunalight-bank0.bas) | **Archived fallback/control**: exact pre-promotion bank-0 source (baseline plus correctness fixes and IRQ music) |
 | [`tools/BLITZ.d64`](tools/BLITZ.d64) | **Required tracked input**: original C64 Blitz! compiler disk (`blitz compiler`). Do not modify |
 | [`current/luna081426`](current/luna081426) | Baseline tokenized PRG — source-of-truth for the baseline round-trip |
 | [`current/luna081426-old`](current/luna081426-old) | Earlier `LUNAON4A` tokenized PRG (historical) |
 | [`sprites/lsprite.prg`](sprites/lsprite.prg) / [`current/lsprite`](current/lsprite) | Original sprite shapes at `$2E7C`; unmodified |
-| [`src/music.s`](src/music.s) | Three-voice IRQ title soundtrack (embedded at `$4200`) |
-| [`src/rng.s`](src/rng.s) | TOD-entropy collector and PRNG table at `$4400-$4BFF`; **used** by the canonical package for terrain generation |
-| [`src/lunalight-m3x1.bas`](src/lunalight-m3x1.bas) | Reference: 2024 M3X1 rewrite |
-| [`src/lunalight-experimental.bas`](src/lunalight-experimental.bas) | Reference: 2024 LUNAON1 fork |
-| [`src/lunalight-1985.bas`](src/lunalight-1985.bas) | Reference: 1985 LIST decompilation |
-| [`src/LUNALIGH.D64`](src/LUNALIGH.D64) | Historical 1985 disk image |
+| [`historical/lunalight-optimized.bas`](historical/lunalight-optimized.bas) | Prior evolved source (fixed-point physics, Mars, etc.) — reference only |
+| [`historical/lunalight-m3x1.bas`](historical/lunalight-m3x1.bas) | Reference: 2024 M3X1 rewrite |
+| [`historical/lunalight-experimental.bas`](historical/lunalight-experimental.bas) | Reference: 2024 LUNAON1 fork |
+| [`historical/lunalight-1985.bas`](historical/lunalight-1985.bas) | Reference: 1985 LIST decompilation |
+| [`historical/LUNALIGH.D64`](historical/LUNALIGH.D64) | Historical 1985 disk image |
 
 Source text is lowercase: `petcat` maps lowercase ASCII to PETSCII uppercase.
 
@@ -129,7 +131,7 @@ any screenshot with
 ### Bank-0 fallback
 
 ```bash
-make blitz-bank0     # build/lunalight-bank0-blitz-full.prg from src/lunalight-bank0.bas
+make blitz-bank0     # build/lunalight-bank0-blitz-full.prg from archived/lunalight-bank0.bas
 make run-bank0       # x64sc autostart of the fallback
 ```
 
@@ -144,7 +146,7 @@ SID clear at line 990 costs it one step of tone rather than silencing it.
 ### Verification
 
 ```bash
-make verify-baseline        # petcat round-trip of src/luna081426.bas ↔ current/luna081426
+make verify-baseline        # archived/luna081426.bas ↔ current/luna081426
 make verify-blitz-motion    # canonical bank-2 motion oracle vs the original fixture
 make verify-bank2-motion    # same target under its bank-2 name
 make verify-blitz-gameplay  # canonical aggregate: motion oracle + full runtime suite
@@ -168,20 +170,24 @@ differs every game by design. The canonical aggregate replaces it.
 VICE-driven targets own the emulator and its monitor port, so the Makefile
 declares `.NOTPARALLEL`; do not run them with `make -j`.
 
-### Alternate toolchains (bank-0 lineage, explicit names)
+### Alternate toolchains
 
-These paths embed or patch assets at the bank-0 addresses (`$2E7C` sprites), so
-they are bound to `src/lunalight-bank0.bas`. They are **not** bank-2 capable and
-claim no parity with the canonical package.
+MOSpeed compiles the canonical source with the same music, RNG and rebased
+bank-2 sprite assets as the original-Blitz package. Its generated code relocates
+around `$4200-$4BFF`; packaging fills those holes and appends sprites at
+`$AE7C`. MOSpeed remains an alternate compiler and does not replace the
+original-Blitz shipping artifact.
+
+Interpreted BASIC and Reblitz remain archived bank-0 lineage paths.
 
 | Target | Output | Notes |
 | ------ | ------ | ----- |
-| `make prg` | `build/lunalight.prg`, `build/lunalight-bank0.prg` | Tokenized BASIC for both lineages |
+| `make prg` | `build/lunalight.prg`, `build/lunalight-bank0.prg` | `lunalight.prg` is the readable tokenized source, not a standalone game: its music, RNG, and rebased sprites live at separate fixed addresses. Combining those bank-2 assets into one BASIC PRG makes BASIC V2 treat the final asset byte as program memory and fail with `OUT OF MEMORY`. |
 | `make full` | `build/lunalight-bank0-full.prg` | Interpreted BASIC + flag sprites + music + RNG embed, bank-0 layout |
 | `make run-basic` | — | Autostart the interpreted bank-0 full PRG |
-| `make mospeed` | `build/lunalight-bank0-mospeed-full.prg` | MOSpeed cross-compile of the bank-0 source + asset patch |
-| `make run-mospeed` | — | Autostart the MOSpeed bank-0 full PRG |
-| `make d64-mospeed` | `build/lunalight-bank0-mospeed.d64` | Former default disk: MOSpeed PRG + `.bas` + `music` + `rng` |
+| `make mospeed` | `build/lunalight-mospeed-full.prg` | MOSpeed cross-compile of canonical `src/lunalight.bas` + bank-2 assets |
+| `make run-mospeed` | — | Autostart the MOSpeed bank-2 full PRG |
+| `make d64-mospeed` | `build/lunalight-mospeed.d64` | MOSpeed PRG + canonical `.bas` + `music` + `rng` |
 | `make reblitz` | `build/lunalight-bank0-reblitz.prg` | **Experimental** JS Reblitz64 port of the bank-0 source; overruns sprites; not packaged |
 
 MOSpeed needs Java and downloads `tools/mospeed/basicv2.jar` on first use.

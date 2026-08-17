@@ -8,7 +8,7 @@ post-mortem text, RNG/procedural terrain/pad metadata/refuel flag, and attract
 mode — are now **all retained and promoted**. The canonical source is
 `src/lunalight.bas` (the former `src/lunalight-bank2.bas`), and the canonical
 artifact is `build/lunalight-blitz-full.prg`. The pre-promotion bank-0 source is
-preserved verbatim as `src/lunalight-bank0.bas` and still builds and runs via
+preserved verbatim as `archived/lunalight-bank0.bas` and still builds and runs via
 `make blitz-bank0`.
 
 The enabling change was the VIC-bank-2 relocation, not a physics or formula
@@ -20,7 +20,7 @@ altered.
 | Build | Original-Blitz output | Range | Code ceiling | Headroom |
 | --- | --- | --- | --- | --- |
 | Bank-0 baseline plus correctness fixes | 9,665 bytes | `$0801-$2DBF` | `$2E7B` (sprite start - 1) | 188 bytes |
-| Bank-0 fallback, with IRQ music (`src/lunalight-bank0.bas`) | 9,670 bytes | `$0801-$2DC4` | `$2E7B` | 183 bytes |
+| Bank-0 fallback, with IRQ music (`archived/lunalight-bank0.bas`) | 9,670 bytes | `$0801-$2DC4` | `$2E7B` | 183 bytes |
 | Bank-2 relocation only, after the retained optimizations | 9,675 bytes | `$0801-$2DCB` | `$41FF` (music start - 1) | 5,172 bytes |
 | **Canonical promoted build (`src/lunalight.bas`)** | **11,433 bytes** | **`$0801-$34A7`** | **`$41FF`** | **3,416 bytes** |
 | Canonical build with the orbiting command module | 11,585 bytes | `$0801-$3541` | `$41FF` | 3,262 bytes |
@@ -106,7 +106,7 @@ tier present, never both. Three VICE seeds exercised both branches — seed 1
 The pad-failure fallthrough gained the single marker `xz=1:` so the post-mortem
 knows a crash happened off-pad; the landing statement it precedes is still byte
 for byte the bank-0 text, and the shared scoring lines (752, 753, 754, 755, 760)
-are held byte-identical against `src/lunalight-bank0.bas`
+are held byte-identical against `archived/lunalight-bank0.bas`
 (`landing.shared_scoring_identical`).
 
 ### 3. RNG, procedural terrain, pad metadata and refuel flag
@@ -423,7 +423,7 @@ attract it oscillated only between `$9FC3` and `$A000`, a working set of about 6
 bytes. Two checks in the attract phase pin this — `strings.heap_reclaimed_between_rounds`
 and `strings.heap_clear_of_screen_matrix`.
 
-This hazard is specific to bank 2. In `src/lunalight-bank0.bas` the screen is at
+This hazard is specific to bank 2. In `archived/lunalight-bank0.bas` the screen is at
 `$0400`, far below the heap's floor, so the fallback collects normally and needs
 no equivalent.
 
@@ -472,7 +472,7 @@ well clear of the music player at `$4200`.
 
 | Check | Result |
 | --- | --- |
-| `make verify-baseline` | Exact byte match: `src/luna081426.bas` retokenizes to `current/luna081426` |
+| `make verify-baseline` | Exact byte match: `archived/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank2` (canonical runtime suite) | 93 of 93 checks passed, including four-cell pad geometry, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |

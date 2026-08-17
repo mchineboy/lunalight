@@ -36,7 +36,6 @@ jobs:
         run: |
           xvfb-run --auto-servernum make verify-blitz-gameplay d64
           test -s build/lunalight-blitz-full.prg
-          test -s build/lunalight.prg
           test -s build/lunalight.d64
 
       - name: Create GitHub release
@@ -46,7 +45,6 @@ jobs:
         run: |
           assets=(
             build/lunalight-blitz-full.prg
-            build/lunalight.prg
             build/lunalight.d64
           )
 
