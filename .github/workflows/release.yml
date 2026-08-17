@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out tagged source
@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo add-apt-repository --yes multiverse
           sudo apt-get update
-          sudo apt-get install --yes cc65 vice xvfb
+          sudo apt-get install --yes cc65 default-jre-headless vice xvfb
 
           # Debian removes the ROM data required by VICE. Restore the data from
           # the matching official upstream source release.
@@ -34,9 +34,12 @@ jobs:
 
       - name: Verify and build release artifacts
         run: |
-          xvfb-run --auto-servernum make verify-blitz-gameplay d64
+          xvfb-run --auto-servernum make verify-blitz-gameplay d64 d64-mospeed
           test -s build/lunalight-blitz-full.prg
+          test -s build/lunalight-mospeed-full.prg
           test -s build/lunalight.d64
+          test -s build/lunalight-mospeed.d64
+          cp build/lunalight.d64 build/lunalight-blitz.d64
 
       - name: Create GitHub release
         env:
@@ -45,7 +48,9 @@ jobs:
         run: |
           assets=(
             build/lunalight-blitz-full.prg
-            build/lunalight.d64
+            build/lunalight-mospeed-full.prg
+            build/lunalight-blitz.d64
+            build/lunalight-mospeed.d64
           )
 
           if gh release view "$TAG" >/dev/null 2>&1; then

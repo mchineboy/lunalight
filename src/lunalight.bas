@@ -202,6 +202,8 @@
   1510 poke214,23:print:print"{rvon}{lblu} hi";hs;tab(17);"score";pt;:printtab(32);nm;"lems";
   1515 ifamthenprint"{home}{rvon}{lblu} attract "
   1520 return
+  1700 pokepn+6,251:pokev+12,pp:pokev+13,po:pokev+45,15
+  1705 pokev+21,peek(v+21)or64:poke679,10:sys17420:return
   1900 rem crash post-mortem: exactly one line, cause or consequence, by rng
   1902 cr=.:gosub900:ifrv<128goto1914
   1903 cv=abs(int(m2)):ch=abs(hm)
@@ -248,8 +250,6 @@
   1980 ifz$="{rght}"thenjv=(jvand16)+7
   1982 ifz$="{down}"thenjv=(jvand16)+11
   1984 return
-  1700 pokepn+6,251:pokev+12,pp:pokev+13,po:pokev+45,15
-  1705 pokev+21,peek(v+21)or64:poke679,10:sys17420:return
   2100 rem crash consequences; restore indexes these by jiffy
   2102 data"salvage crews found one boot"
   2104 data"houston is billing your estate"
