@@ -4,7 +4,7 @@ Commodore 64 lunar lander by Steven Hardison (public domain).
 
 ![Lunalight title screen and attract-mode landing](docs/lunalight-gameplay.gif)
 
-Canonical playable path: **`src/lunalight.bas`** compiled with Dad’s original
+Canonical playable path: **`src/lunalight.bas`** compiled with the original
 **Blitz!** disk [`tools/BLITZ.d64`](tools/BLITZ.d64), producing
 [`build/lunalight-blitz-full.prg`](build/lunalight-blitz-full.prg). Physics remain
 the original float equations from [`current/luna081426`](current/luna081426)
@@ -32,7 +32,7 @@ Layer evidence and measured results:
 | [`src/lunalight-bank0.bas`](src/lunalight-bank0.bas) | **Fallback**: the exact pre-promotion bank-0 canonical source (baseline plus correctness fixes and IRQ music). Also the control the promoted build is verified against |
 | [`src/lunalight-optimized.bas`](src/lunalight-optimized.bas) | Prior evolved source (fixed-point physics, Mars, etc.) — reference only |
 | [`tools/BLITZ.d64`](tools/BLITZ.d64) | **Required tracked input**: original C64 Blitz! compiler disk (`blitz compiler`). Do not modify |
-| [`current/luna081426`](current/luna081426) | Dad’s tokenized PRG — source-of-truth for the baseline round-trip |
+| [`current/luna081426`](current/luna081426) | Baseline tokenized PRG — source-of-truth for the baseline round-trip |
 | [`current/luna081426-old`](current/luna081426-old) | Earlier `LUNAON4A` tokenized PRG (historical) |
 | [`sprites/lsprite.prg`](sprites/lsprite.prg) / [`current/lsprite`](current/lsprite) | Original sprite shapes at `$2E7C`; unmodified |
 | [`src/music.s`](src/music.s) | Three-voice IRQ title soundtrack (embedded at `$4200`) |
@@ -64,13 +64,13 @@ Added by the promotion (all verified, see below):
 | Title soundtrack | Three voices: triangle bass on the chord root, sawtooth melody under a low-pass cutoff sweep, and a pulse echo of the melody four steps back. `SYS 16896` installs the player embedded at `$4200-$43E5`; `SYS 16899` restores the KERNAL IRQ and silences the SID, so flight and attract run without music and leave the chip to the engine and explosion effects |
 | RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)` |
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
-| Landing pads | Five generated pads with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge and the lander graphic fills its 24-pixel sprite. Dad's fixed pads carried that half-sprite offset in their hand-tuned windows; the generated ones need it stated |
+| Landing pads | Five generated pads, always four glyphs (32 pixels) wide, with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The fixed width gives the 24-pixel LEM four pixels of visual clearance on each side, including inset pads. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
 | Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, light blue, unexpanded. The pennant carries an Earth wire-globe emblem |
 | Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
-| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo; any key or joystick input returns to the title. The demo never writes the high score. Each flight uses the same `ep`/`hp` spawn and momentum sequence as real play, selects a random generated pad without immediately repeating one, and crosses the terrain toward the pad centre for the bonus. Its descent is a suicide burn: it free-falls, letting the LEM accelerate, then thrusts late — starting the burn once the remaining altitude equals the physics braking distance `m2*m2/24+m2` — to arrest velocity just in time. It steers without holding the thruster on, and diverts to the refuel pad below 400 fuel |
+| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo; any key or joystick input returns to the title. The demo never writes the high score. Each flight uses the normal `ep`/`hp` spawn and momentum sequence and selects a random pad without immediately repeating one. It crosses high, releases into a ballistic dive 90 pixels out, and finishes with one continuous late burn that bends onto the pad. The first three approaches aim at the centre for the bonus; every fourth deliberately aims just outside the left edge and crashes, demonstrating failure at an exact 25% cadence. It diverts to the refuel pad below 400 fuel |
 
 The original sprite payload, the physics constants, the oracle tolerances and the
 motion fixture are unchanged by the promotion. Only the sprite payload’s **load
@@ -192,7 +192,7 @@ Reblitz needs a local `tools/reblitz64` checkout (gitignored).
 | Compiler | What it is | Role here |
 | -------- | ---------- | --------- |
 | **Original Blitz!** (`tools/BLITZ.d64`) | C64 Blitz!/Austro-Speed run under VICE via [`tools/blitz-compile.py`](tools/blitz-compile.py) | **Canonical** playable binary |
-| **Reblitz64** | Host-side JS reimplementation | Experimental only; not Dad’s compiler |
+| **Reblitz64** | Host-side JS reimplementation | Experimental only; not the original Blitz! compiler |
 | **MOSpeed** | Java 6502 BASIC V2 cross-compiler | Alternate; different codegen and packaging |
 | **Interpreted BASIC V2** | `petcat` tokenize + embed | Slow; useful for source debugging |
 
@@ -202,8 +202,8 @@ CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`–`$34A7` | Blitz machine code (11,431 bytes for the promoted source) |
-| `$34A8`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,416 bytes of headroom to the music player |
+| `$0801`–`$360F` | Blitz machine code (11,793-byte PRG for the promoted source) |
+| `$3610`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,056 bytes of headroom to the music player |
 | `$4200`–`$43E5` | Three-voice title soundtrack player; 26 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
@@ -241,8 +241,8 @@ The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
 Measured results for each layer are in
 [`docs/feature-layering.md`](docs/feature-layering.md).
 
-Gameplay “feel” still wants Dad’s confirmation; the oracle catches timing and
-position drift, not subjective handling.
+Subjective handling still needs manual confirmation; the oracle catches timing and
+position drift, not feel.
 
 ## Tools
 

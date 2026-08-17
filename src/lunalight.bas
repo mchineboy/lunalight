@@ -143,7 +143,7 @@
   1136 next:px(1)=1:px(2)=9:px(3)=17:px(4)=25:px(5)=33
   1137 gosub900:ro=int(rv*5/256):fz=.
   1140 fori=1to5:gosub900:cs=px(i)+int(rv*3/256)
-  1142 gosub900:pw(i)=3+(rvand1):ce=cs+pw(i)-1:rf(i)=.
+  1142 pw(i)=4:ce=cs+pw(i)-1:rf(i)=.
   1143 zz=i+ro:ifzz>5thenzz=zz-5
   1145 ifzz=1orzz=3thengosub900:hh=9+int(rv*4/256):goto1151
   1147 ifzz=2orzz=5thengosub900:hh=3+(rvand1):goto1151
@@ -158,8 +158,11 @@
   1163 ifcs-d>=.thenifhh>=4andhh<=8thenh(cs-d)=hh+int(d/2)
   1164 ifce+d<40thenifhh>=4andhh<=8thenh(ce+d)=hh+int(d/2)
   1165 nextd:py(i)=242-hh*8:px(i)=24+cs*8:nexti
-  1175 forc=0to39:ht=h(c):forln=13-htto12
-  1180 pk=sn+ln*40+c:pokepk,160:pokepk+bc,tc:if((c*17+ln*31)and3)=1thenpokepk+bc,td
+  1175 forc=0to39:ht=h(c):hl=.:hr=.:ifc>.thenhl=h(c-1)
+  1176 ifc<39thenhr=h(c+1)
+  1177 forln=13-htto12:sc=160:ifln=13-htthenifhr>htthensc=108
+  1178 ifln=13-htthenifsc=160thenifhl>htthensc=123
+  1180 pk=sn+ln*40+c:pokepk,sc:gosub900:pokepk+bc,tc:if(rvand3)=1thenpokepk+bc,td
   1190 nextln:nextc
   1192 fori=1to5:cs=int((px(i)-24)/8):ce=cs+pw(i)-1:ln=13-ph(i):pk=sn+ln*40
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
@@ -206,11 +209,12 @@
   1914 cn=(cn+1+peek(162))and15:ifcn>12thencn=cn-13
   1916 restore:forx=.tocn:readq$:next
   1918 xz=.:a$="{yel}"+q$:gosub982:return
-  1920 rem random demo pad from the normal player spawn; avoid immediate repeats
+  1920 rem random demo pad; every fourth approach deliberately misses to the left
   1922 gosub900:al=1+int(rv*5/256)
   1923 ifal=akthenal=al+1:ifal>5thenal=1
   1924 ak=al:iffe<400thenifrf(rz)thenal=rz
-  1925 tx=px(al)+(pw(al)-3)*4:ap=.:return
+  1925 tx=px(al)+4:af=(af+1)and3:ifaf=.thentx=px(al)-16
+  1926 ap=.:return
   1950 rem float autopilot: cross high, release into a dive, then one late burn
   1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
   1952 ae=tx-pp:ife2thenae=ae-256

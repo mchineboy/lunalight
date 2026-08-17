@@ -469,6 +469,32 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         "the successful-landing path restores the lander's X-MSB so a craft that "
         "lands past sprite X 255 stays on its pad instead of snapping 256px left",
     )
+    report.check(
+        "landing.generated_pads_are_four_glyphs_wide",
+        1142 in variant and "pw(i)=4" in _normalize(variant[1142]),
+        {"line_1142": variant.get(1142)},
+        "every generated landing pad is exactly four character cells wide",
+    )
+
+    planned_miss = {
+        1925: "tx=px(al)+4:af=(af+1)and3:ifaf=.thentx=px(al)-16",
+        1926: "ap=.:return",
+    }
+    planned_miss_diff = [
+        line
+        for line, expected in planned_miss.items()
+        if line not in variant
+        or _normalize(expected) not in _normalize(variant[line])
+    ]
+    report.check(
+        "attract.every_fourth_approach_deliberately_misses",
+        not planned_miss_diff,
+        {
+            "differing": planned_miss_diff,
+            "lines": {line: variant.get(line) for line in planned_miss},
+        },
+        "the demo centres three approaches, then aims outside the pad on the fourth",
+    )
 
     # Scoring arithmetic shared with the bank-0 fallback (velocity, tilt and fuel
     # penalties plus the running total) must remain byte-identical.
@@ -824,7 +850,10 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         attempt_exploded = False
 
         deadline = time.monotonic() + args.attract_timeout
-        while time.monotonic() < deadline and successes < 2:
+        # Observe four complete approaches: the demo deliberately centres the
+        # first three and aims outside the pad on the fourth. Reaching a fifth
+        # spawn proves that fourth approach completed.
+        while time.monotonic() < deadline and (successes < 2 or len(starts) < 5):
             screen = session.screen()
             vic = monitor.memory_paused(0xD000, 0xD02F)
             monitor.resume()
@@ -899,6 +928,13 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             successes >= 2,
             {"successful_landings": successes, "explosions": explosions, "starts": starts},
             "at least two score-advancing flights without an explosion",
+        )
+        report.check(
+            "attract.fourth_approach_demonstrates_failure",
+            len(starts) >= 5 and explosions >= 1,
+            {"explosions": explosions, "starts": starts},
+            "four completed approaches with at least one explosion from the "
+            "deliberately off-pad fourth target",
         )
         report.check(
             "attract.lands_on_the_bonus_bullseye",
@@ -1065,7 +1101,7 @@ def check_flight(session: Session, report: Report) -> None:
         for pad in pads
         if PAD_BODY_COLOR in pad["colours"]
         and pad["edges"] == [PAD_EDGE_COLOR, PAD_EDGE_COLOR]
-        and pad["width"] >= 3
+        and pad["width"] == 4
     ]
     report.check(
         "flight.landing_pads_rendered",
@@ -1080,7 +1116,7 @@ def check_flight(session: Session, report: Report) -> None:
             "well_formed": len(well_formed),
             "sample": well_formed[0] if well_formed else None,
         },
-        "at least 3 pads with a green (5) body flanked by grey (7) edge cells",
+        "at least 3 four-cell pads with a green (5) body flanked by grey (7) edges",
     )
     report.check(
         "flight.hud_row_present",

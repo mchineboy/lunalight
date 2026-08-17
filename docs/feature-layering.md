@@ -25,6 +25,8 @@ altered.
 | **Canonical promoted build (`src/lunalight.bas`)** | **11,433 bytes** | **`$0801-$34A7`** | **`$41FF`** | **3,416 bytes** |
 | Canonical build with the orbiting command module | 11,585 bytes | `$0801-$3541` | `$41FF` | 3,262 bytes |
 | Canonical build with the suicide-burn attract descent | 11,613 bytes | `$0801-$355D` | `$41FF` | 3,234 bytes |
+| Canonical build with the dive-and-burn attract descent | 11,676 bytes | `$0801-$359A` | `$41FF` | 3,173 bytes |
+| Canonical build with four-cell pads, slope glyphs and the 3:1 demo cadence | 11,793-byte PRG | `$0801-$360F` | `$41FF` | 3,056 bytes |
 
 The last two rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -121,12 +123,16 @@ before the title; `SYS 17411` refills the table for each game.
 
 The verified flight drew procedural terrain across the lower rows
 (`flight.procedural_terrain_rows_present`) and five generated pads
-(`flight.landing_pads_rendered`), each a run of screen code 100 with a green body
-flanked by grey edge cells (`flight.landing_pad_colour_pattern`); the observed
-run was rows 14, 14, 18, 21, 22 at widths 3-4. The landing verdict is now the
-generic `px`/`pw`/`py`/`pb`/`rf` pad loop rather than hard-coded windows, pinned
-by `landing.generic_pad_verdict_logic`, with the float velocity threshold 5 and
-the tilt and upright-shape gates unchanged.
+(`flight.landing_pads_rendered`), each exactly four glyphs (32 pixels) wide and
+drawn as a run of screen code 100 with a green body flanked by grey edge cells
+(`flight.landing_pad_colour_pattern`,
+`landing.generated_pads_are_four_glyphs_wide`). The original 3-4-cell random
+width made a 3-cell pad exactly as wide as the 24-pixel LEM, leaving no visual
+margin; inset pads then made the craft strike a side wall even when nominally
+centred. Four cells leave four pixels of clearance per side. The landing verdict
+remains the generic `px`/`pw`/`py`/`pb`/`rf` pad loop rather than hard-coded
+windows, pinned by `landing.generic_pad_verdict_logic`, with the float velocity
+threshold 5 and the tilt and upright-shape gates unchanged.
 
 The refuel flag is the original payload's previously empty slot 243, patched by
 `tools/make-shapes.py` and carried through the rebase: only that 64-byte block
@@ -182,25 +188,50 @@ centre is `pf+12`. Three consequences followed:
 - A player could be credited with a landing while the craft hung entirely off
   the pad's right end.
 
-Dad's fixed pads did not have this problem: pad 1's window was `pf` 71–88 with
+The original fixed pads did not have this problem: pad 1's window was `pf` 71–88 with
 the bullseye at 79/80, which is the visual centre sitting over the pad. The
-half-sprite offset was baked into his hand-tuned constants and was lost when the
+half-sprite offset was baked into those hand-tuned constants and was lost when the
 procedural layer started generating windows from `px`. Line 649 now reads
 `pf=int(pp)+12`, which restores that calibration; the verifier pins the constant
 through `SPRITE_CENTRE_OFFSET`. No physics constant changed, and the motion
 oracle is unaffected because `pf` is only evaluated at touchdown.
 
+### A landed craft jumped 256 pixels off its pad
+
+Line 720, the successful-landing path, writes `pokev+16,fm`. `fm` is the `$D010`
+value for a lander whose X-MSB is *clear*, so the write clears bit 0 of the
+sprite X-MSB register. Any craft that touched down past sprite X 255 — `e2=1`,
+where the real X is `pp+256` — was therefore redrawn at `pp`, snapping 256
+pixels to the left of the pad it had just landed on, and it stayed there through
+the scoring messages until the next LEM spawned.
+
+The original fixed pads never exposed this: their windows all sat below X 255, so
+`e2` was always 0 at touchdown. The procedural layer generates pads across the
+full `24-336` range, which made the latent bug reachable.
+
+Line 720 is one of the landing lines held byte-identical to the bank-0 fallback,
+so the repair goes where the same problem is already solved for the command
+module: the tail of the bank-2-only routine that 720 calls via `gosub1210`.
+Line 1214 now restores the bit with `ife2thenpokev+16,peek(v+16)or1`. The
+`RETURN` had to move to its own line 1215, because a `:return` appended after
+`then` would only execute when the condition held and would otherwise fall
+through into the keypress loop. Pinned by
+`landing.lander_x_msb_restored_on_pad`.
+
 ### Attract mode now plays to win
 
-Five autopilot changes, all behind `IF am`:
+Eight autopilot changes, all behind `IF am`:
 
 | Change | Line | Effect |
 | --- | --- | --- |
 | Steering no longer holds the thruster on | 1970-1977 | `jt` carries the fire bit separately, so a rotation frame only burns fuel when descent actually needs braking. Fuel burn is subtracted 1:1 from score at line 754 |
 | Random destination without immediate repeats | 1922-1924 | A byte from the RNG table selects one of the five generated pads; an immediate repeat advances to the next pad |
 | Refuel diversion | 1924 | Below 400 fuel the demo targets `rz` when that pad carries `rf()`, instead of cycling into a game over |
-| Two-phase swoop | 1951-1967 | A cruise phase crosses the map at altitude and cancels the starting horizontal momentum; once aligned over the pad within a pixel with `hm=0`, `ap` latches and the descent phase begins |
-| Suicide-burn descent | 1965 | Free-fall at `av=60` (no thrust) until the remaining altitude reaches the physics braking distance `bd=m2*m2/24+m2`, then brake at `av=4` to ride the landing gate down |
+| Three landings, one demonstrated failure | 1925-1926 | `af=(af+1)and3` centres three approaches at `px+4`; the fourth targets `px-16`, putting the LEM's centre four pixels outside the pad's left edge for an exact 25% deliberate-failure cadence |
+| Cross high, then release into a dive | 1953-1956 | While more than 90 px from the target the craft holds altitude at `po=60` and crosses at full speed; inside 90 px it stops holding and falls ballistically, carrying its horizontal speed into a diagonal |
+| One late braking burn | 1954-1955 | `ap` latches when the remaining altitude reaches the braking distance and stays latched, so the burn is a single continuous thrust to touchdown instead of a velocity clamp |
+| Arrival timing law | 1957-1962 | Horizontal speed is the lesser of what can still be stopped (`sqr(8*aa)`) and what arrives with the fall (`aa*m2/(5*ag)`), so the craft does not reach the pad column early and drop vertically |
+| Climb guard | 1965 | Steering forces the thruster on, and each angled frame also removes `.6` of vertical speed; without `ifm2<-2thenah=hm` a large course reversal flew the demo into the ceiling |
 
 The first correction cheated visually: line 90 replaced the real spawn with
 `pp=tx:hm=0`, placing the craft directly over the selected pad, which reduced
@@ -209,20 +240,56 @@ now enters from the exact normal `ep`/`hp` player sequence with its initial
 horizontal momentum, crosses the terrain toward the random destination, aligns,
 and then descends.
 
-The descent itself was reworked from a low velocity clamp (12/8/4/1) into a
-suicide burn so it matches how the game is meant to be flown: let the LEM fall
-and thrust late for a just-in-time landing. The clamp is derived, not guessed —
-`tools/verify-blitz-gameplay.py` only samples the first 70 jiffies, so the
-descent profile was tuned against a one-dimensional model of the exact flight
-loop (`m2+=.6` coast, `m2-=.6` thrust, `po+=.1+m2/20`, gate `int(m2)<=5`). The
-braking distance `v^2/24 + v` px comes from that model: it is the altitude a
-full straight-up burn needs to arrest velocity `v` to the gate. Swept across
-every realistic descent start it never crashes, peaks at a 20-36 fall velocity
-(against the old ~12 crawl), and touches down at `m2` 3.4-4.4, inside the gate
-with margin for VICE timing. Two clean bonus landings per demo run verify
-(`attract.repeatable_successful_landings`, `attract.lands_on_the_bonus_bullseye`);
-the distinct real-play entries are pinned by
-`attract.normal_spawn_sequence_across_attempts`.
+The descent was then reworked twice more, because two successive versions were
+technically correct and visually wrong.
+
+The first replaced the old velocity clamp (12/8/4/1) with a suicide burn keyed on
+a braking distance. It still looked like a gradual slowdown, for a reason worth
+recording: the trigger `ag<=bd` was re-evaluated every frame, so braking shrank
+`bd`, which un-triggered it. The craft tracked that boundary to the ground,
+alternating thrust and coast at low speed. A single decisive burn requires the
+trigger to **latch**. The braking distance also has a closed form rather than the
+`v^2/24+v` guess: arresting `v` to the gate takes `(v-vt)/.6` frames covering
+`(v-vt)(v+vt+4)/24` px. The guess overestimated by ~26 px at `v=30`, so the burn
+finished high and the remaining altitude became a slow hover.
+
+The second version made the burn a single block but flew an "L": the craft dashed
+sideways at full speed *at the top of the screen*, killed `hm`, then dropped
+vertically. Emulator telemetry (sampling `$D000`/`$D001` and the HUD during a
+live demo) also showed it climbing into the ceiling at `vel -15`, because
+steering force-fires the thruster and every angled frame also removes `.6` of
+vertical speed, so a reversal from `hm=+16` to `-16` is 32 consecutive thrust
+frames.
+
+The shipped version accepts a constraint the earlier attempts ignored: the craft
+**spawns already falling** at `m2=25-47`, so its braking distance is 34-100 px
+from the first frame and a long ballistic dive from spawn cannot be arrested.
+Cancelling that spawn velocity early is unavoidable. So the demo crosses the map
+at held altitude, releases into a ballistic diagonal 90 px out, and finishes with
+one continuous burn that bends the trajectory down onto the pad. Horizontal speed
+during the descent is capped by both what can still be stopped and what arrives
+in time with the fall, so it does not reach the pad column early.
+
+This was tuned against a 2-D model of the flight loop that reproduces the exact
+rotation table (lines 168-182), the thrust table (line 245, including the
+`p=189/193` hard tilt), the `pp`/`e2` page wrap (lines 360-420), procedural
+terrain (lines 1100-1165) and terrain collision — because a pad-only model
+predicted 99.7% landings for a profile that exploded four times out of five in
+the emulator. Measured on the shipped profile: peak fall velocities of 35-46
+(against the old ~12 crawl), touchdown at `m2` 2-3, no ceiling contact, and
+demo scores of 0 → 1144 → 1538 → 2726. Two clean bonus landings per demo run
+verify (`attract.repeatable_successful_landings`,
+`attract.lands_on_the_bonus_bullseye`); the distinct real-play entries are pinned
+by `attract.normal_spawn_sequence_across_attempts`.
+
+The demo is intentionally not infallible. The first three approaches aim at the
+centre; every fourth aims just outside the left edge so the explosion teaches the
+player what a miss looks like. This is deterministic rather than a 25% random
+roll, so every four-attempt cycle contains exactly one planned failure. Natural
+terrain collisions may add rare failures. The verifier pins the source cadence
+(`attract.every_fourth_approach_deliberately_misses`) and now runs through the
+fourth completed approach, observing three score-advancing landings followed by
+an explosion (`attract.fourth_approach_demonstrates_failure`).
 
 ### VEL label column
 
@@ -336,9 +403,9 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code, with the command module | `$0801-$355D` | 11,613 |
-| Zero-filled runtime workspace for BASIC's variables | `$355E-$3B5D` | 1,536 |
-| `0xAA` filler through the ceiling | `$3B5E-$41FF` | 1,698 |
+| Canonical code | `$0801-$360F` | 11,791 loaded bytes |
+| Zero-filled runtime workspace for BASIC's variables | `$3610-$3C0F` | 1,536 |
+| `0xAA` filler through the ceiling | `$3C10-$41FF` | 1,520 |
 
 The padded artifact passes the motion oracle and the full runtime suite,
 including the demo landings, and the filler above BASIC's live data reads back
@@ -362,9 +429,9 @@ well clear of the music player at `$4200`.
 | `make verify-baseline` | Exact byte match: `src/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 87 of 87 checks passed, including `flight.pointer[7]_at_$87FF`, `flight.module_sprite_colour_$D02E`, `flight.module_sprite_y_$D00F` and `flight.module_x_msb_clear` |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 87-check suite, 0 failures |
-| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 90 of 90 checks, including the demo landings and `capacity.free_filler_intact_above_basic_data` |
+| `make verify-bank2` (canonical runtime suite) | 91 of 91 checks passed, including four-cell pad geometry, three clean approaches, and the deliberately failed fourth approach |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 91-check suite, 0 gameplay failures |
+| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 94 of 94 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
 | `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 20 seconds` |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |
@@ -397,5 +464,5 @@ describing the lineage it was recorded from.
 
 Successful landing is not input-driven by the six-sample oracle, but attract mode
 demonstrates it end to end, and the collision latch that gates it is exercised in
-both the canonical and bank-0 descents. Gameplay feel still wants Dad's
-confirmation.
+both the canonical and bank-0 descents. Subjective handling still needs
+manual confirmation.
