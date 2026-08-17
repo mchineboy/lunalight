@@ -42,9 +42,14 @@ TERRAIN_TILE = 160
 PAD_SURFACE_TILE = 100
 PAD_BODY_COLOR = 5
 PAD_EDGE_COLOR = 7
-# The refuel flag lives on sprite 4, pointer slot 243, coloured light blue (14)
-# and unexpanded. Its shape is patched into the spare sprite slot 243 whose
-# VIC-bank-2 address is $BCC0.
+# The refuel flag lives on sprite 4, pointer slot 243, coloured white and
+# unexpanded. Its shape is patched into the spare sprite slot 243 whose
+# VIC-bank-2 address is $BCC0. Sprite 5 carries the pennant field from slot 245
+# at the same coordinates one priority step behind it, so the outline, emblem and
+# mast read as white over blue: the Earth decoration's two-sprite layover, and
+# its palette, applied to the flag. The mast and base sit on the front sprite
+# against black sky, so the front sprite has to be the lighter of the pair, and
+# neither colour may be 11 or 12 because the terrain is painted in those greys.
 # The soundtrack belongs to the title screen alone. SYS 16896 points $0314 at
 # the player loaded at $4200; SYS 16899 restores the KERNAL vector, so flight
 # and attract mode leave the SID to the engine and explosion effects.
@@ -55,7 +60,12 @@ MUSIC_END = 0x4400
 SPRITE_CENTRE_OFFSET = 12
 FLAG_SLOT = 243
 FLAG_POINTER_INDEX = 4
-FLAG_SPRITE_COLOR = 14
+FLAG_SPRITE_COLOR = 1
+FIELD_SLOT = 245
+FIELD_POINTER_INDEX = 5
+FIELD_SPRITE_COLOR = 6
+# Rows of the flag shape the pennant (and therefore the field block) occupies.
+PENNANT_ROWS = 12
 # The cosmetic orbiting command module lives on sprite 7, pointer slot 244,
 # light grey. Sprite 7 is otherwise explosion-only, so the flight loop has to
 # re-establish it after every round.
@@ -64,14 +74,19 @@ MODULE_POINTER_INDEX = 7
 MODULE_SPRITE_COLOR = 15
 MODULE_SPRITE_Y = 55
 # Shapes patched into spare slots of the original payload by make-shapes.py.
-PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT)
-FLIGHT_POINTERS = {2: 253, 3: 254, MODULE_POINTER_INDEX: MODULE_SLOT}
+PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT, FIELD_SLOT)
+FLIGHT_POINTERS = {
+    2: 253,
+    3: 254,
+    FIELD_POINTER_INDEX: FIELD_SLOT,
+    MODULE_POINTER_INDEX: MODULE_SLOT,
+}
 EXPLOSION_POINTER_RANGE = (203, 242)
 # $D015 enable masks the flight loop writes: coast keeps the lander, the two
-# decoration sprites, the flag and the command module (bits 0,2,3,4,7 = 157);
-# thrust adds the exhaust sprite (bit 1) for 159.
-COAST_ENABLE = 157
-THRUST_ENABLE = 159
+# decoration sprites, the flag, its pennant field and the command module
+# (bits 0,2,3,4,5,7 = 189); thrust adds the exhaust sprite (bit 1) for 191.
+COAST_ENABLE = 189
+THRUST_ENABLE = 191
 # Sprite pointers the source POKEs during flight, the added shapes and explosion.
 USED_POINTERS = (
     tuple(range(187, 195))
@@ -469,6 +484,33 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         "the successful-landing path restores the lander's X-MSB so a craft that "
         "lands past sprite X 255 stays on its pad instead of snapping 256px left",
     )
+    # The flag layover is two sprites deep, so its colours land in adjacent VIC
+    # registers: $D02B (v+43) for the front sprite and $D02C (v+44) for the field
+    # behind it. Sprite 5's power-on colour is already blue, so a field colour
+    # POKEd one register too high still renders correctly by accident; only the
+    # source text distinguishes the intended write from that coincidence.
+    layover = {
+        1210: "poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,"
+        f"{FLAG_SPRITE_COLOR}",
+        1211: f"poke34813,{FIELD_SLOT}:pokev+10,fx:pokev+11,fy:pokev+44,"
+        f"{FIELD_SPRITE_COLOR}",
+        1212: "pokev+21,peek(v+21)or160",
+    }
+    layover_diff = [
+        line
+        for line, expected in layover.items()
+        if line not in variant or _normalize(expected) not in _normalize(variant[line])
+    ]
+    report.check(
+        "flight.flag_layover_register_arithmetic",
+        not layover_diff,
+        {
+            "differing": layover_diff,
+            "lines": {line: variant.get(line) for line in layover},
+        },
+        f"flag colour to $D02B, field slot {FIELD_SLOT} and colour to $D02C at the "
+        "flag's coordinates, and $D015 bits 5 and 7 restored after line 720",
+    )
     report.check(
         "landing.generated_pads_are_four_glyphs_wide",
         1142 in variant and "pw(i)=4" in _normalize(variant[1142]),
@@ -701,6 +743,70 @@ def check_character_source(session: Session, report: Report) -> None:
         f"${char_base:04X} is {'the character ROM image' if rom_image else 'RAM'}; "
         f"the RAM there holds {nonzero} non-zero bytes of 2048",
         "character ROM image, or RAM holding a character set",
+    )
+
+
+def check_flag_layover_rendered(session: Session, report: Report) -> None:
+    """Sample the pennant on screen and prove both layover colours are painted.
+
+    Register reads alone cannot prove this: sprite 5's power-on colour is blue,
+    so a field colour written to the wrong register still reads back as intended
+    and renders in the intended hue by coincidence.
+
+    The window is the sprite box grown by a margin rather than the exact box,
+    because the offset between $D000 coordinates and VICE's reported display
+    origin is not worth pinning here; only pixels of the two layover colours are
+    counted, and neither appears elsewhere near the pad. The Earth decoration
+    shares this palette but sits high in the sky, far outside the window.
+    """
+    monitor = session.monitor
+    assert monitor is not None
+    vic = monitor.memory_paused(0xD000, 0xD017)
+    flag_x = vic[FLAG_POINTER_INDEX * 2] + (256 if vic[0x10] & 0x10 else 0)
+    flag_y = vic[FLAG_POINTER_INDEX * 2 + 1]
+    width, _, pixels, geometry = monitor.display()
+    margin = 8
+    left = max(geometry["x_offset"], geometry["x_offset"] + flag_x - 24 - margin)
+    right = min(
+        geometry["x_offset"] + geometry["width"],
+        geometry["x_offset"] + flag_x - 24 + 24 + margin,
+    )
+    top = max(geometry["y_offset"], geometry["y_offset"] + flag_y - 50 - margin)
+    bottom = min(
+        geometry["y_offset"] + geometry["height"],
+        geometry["y_offset"] + flag_y - 50 + PENNANT_ROWS + margin,
+    )
+    counts: dict[int, int] = {}
+    longest_field_run = 0
+    for row in range(top, bottom):
+        base = row * width
+        run = 0
+        for col in range(left, right):
+            value = pixels[base + col]
+            counts[value] = counts.get(value, 0) + 1
+            run = run + 1 if value == FIELD_SPRITE_COLOR else 0
+            longest_field_run = max(longest_field_run, run)
+    field = counts.get(FIELD_SPRITE_COLOR, 0)
+    outline = counts.get(FLAG_SPRITE_COLOR, 0)
+    report.facts["flag_layover_pixels"] = {
+        "flag_x": flag_x,
+        "flag_y": flag_y,
+        "sampled": sum(counts.values()),
+        "longest_field_run": longest_field_run,
+        "colour_counts": {str(key): counts[key] for key in sorted(counts)},
+    }
+    # A solid field leaves runs the width of the pennant; a field that had been
+    # drawn as an outline, or lost behind the front sprite, could not.
+    report.check(
+        "flight.flag_layover_rendered_in_two_colours",
+        field >= 120 and outline >= 60 and longest_field_run >= 8,
+        {
+            "field_pixels": field,
+            "outline_pixels": outline,
+            "longest_field_run": longest_field_run,
+        },
+        f"at least 120 pixels of field colour {FIELD_SPRITE_COLOR} in runs of 8 or "
+        f"more, and at least 60 pixels of front colour {FLAG_SPRITE_COLOR}",
     )
 
 
@@ -1067,6 +1173,30 @@ def check_flight(session: Session, report: Report) -> None:
         "d017": vic[0x17],
     }
 
+    # The pennant field only reads as a layover while it tracks the flag exactly:
+    # same X including the $D010 bit, same Y, and enabled behind it.
+    field_x = vic[FIELD_POINTER_INDEX * 2] + (256 if vic[0x10] & 0x20 else 0)
+    field_y = vic[FIELD_POINTER_INDEX * 2 + 1]
+    report.check(
+        "flight.field_sprite_enabled",
+        bool(enable & 0x20),
+        {"d015": enable, "field_bit": bool(enable & 0x20)},
+        f"$D015 bit 5 set (coast {COAST_ENABLE} or thrust {THRUST_ENABLE})",
+    )
+    report.equal("flight.field_sprite_colour_$D02C", vic[0x2C] & 0x0F, FIELD_SPRITE_COLOR)
+    report.check(
+        "flight.field_sprite_registered_with_flag",
+        (field_x, field_y) == (flag_x, flag_y) and not vic[0x17] & 0x20,
+        {"field": [field_x, field_y], "flag": [flag_x, flag_y], "d017": vic[0x17]},
+        "field X/Y equal to the flag's and sprite 5 unexpanded",
+    )
+    report.facts["field_sprite"] = {
+        "pointer": pointers[FIELD_POINTER_INDEX],
+        "x": field_x,
+        "y": field_y,
+        "colour": vic[0x2C] & 0x0F,
+    }
+
     report.equal(
         "flight.module_sprite_colour_$D02E",
         vic[0x2E] & 0x0F,
@@ -1162,6 +1292,7 @@ def check_flight(session: Session, report: Report) -> None:
         [line for line in screen if "lems" in line],
         "status row containing 'lems'",
     )
+    check_flag_layover_rendered(session, report)
     check_rendered_pixels(session, report, "flight")
     session.snapshot("flight")
     report.facts["flight_screen"] = [line for line in screen if line.strip()]
@@ -1191,7 +1322,7 @@ def check_sprite_data(session: Session, report: Report) -> None:
     )
     bank_base = session.args.vic_bank * 0x4000
     blocks = {}
-    for pointer in (187, 194, FLAG_SLOT, 253, 254):
+    for pointer in (187, 194, FLAG_SLOT, FIELD_SLOT, 253, 254):
         address = bank_base + pointer * 64
         offset = address - sprite_addr
         blocks[pointer] = f"${address:04X}"
@@ -1673,7 +1804,8 @@ def parse_args() -> argparse.Namespace:
         "--patched-sprite-prg",
         type=Path,
         help="shape-patched sprite PRG (pre-rebase) proving the relocated payload "
-        "carries the refuel flag in slot 243 and the command module in slot 244",
+        "carries the refuel flag in slot 243, the command module in slot 244 and "
+        "the flag's pennant field in slot 245",
     )
     parser.add_argument(
         "--rng-prg",

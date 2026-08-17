@@ -157,7 +157,8 @@ Previously omitted: its autopilot depends on the procedural layer's `px`, `pw`,
 `py` and pad-selection metadata, which had not been retained.
 
 Now retained, because that metadata exists. Advancing the live title jiffy past
-the 20-second idle deadline started the demo (`attract.jiffy_timeout_starts_demo`).
+the idle deadline — now one song loop rather than a fixed 20 s (see the
+soundtrack section) — started the demo (`attract.jiffy_timeout_starts_demo`).
 Across three attempts the autopilot spawned at three distinct generated pads
 (sprite X 44, 108, 172 — `attract.targets_advance_across_attempts`) and landed
 successfully twice with no explosions, score advancing 0 → 573 → 801
@@ -307,18 +308,122 @@ timeout, so neither real play nor the demo runs with music. The verifier checks
 `flight.music_irq_uninstalled`, `attract.music_irq_uninstalled`).
 
 Freeing the SID from flight duty is what paid for the extra voices: triangle bass
-on the chord root, the existing sawtooth melody, and a pulse echo of the melody
-four steps back, plucked on alternate steps. The player fits the same
-`$4200`-to-`$4400` hole because the 32-step reprise now folds onto the theme
-table instead of duplicating it, which bought back 64 bytes against 20 bytes of
-bass table. Envelopes are rewritten on each note step rather than once at
-install, so a caller that wipes the SID between notes — the bank-0 fallback does,
-at line 990 — loses one step of tone instead of the rest of the tune.
+on the chord root, the existing sawtooth melody, and a third pulse voice. The
+player fits the same `$4200`-to-`$4400` hole, ending at `$43F0` with 15 bytes of
+slack. Envelopes are rewritten on each note step rather than once at install, so
+a caller that wipes the SID between notes — the bank-0 fallback does, at line
+990 — loses one step of tone instead of the rest of the tune.
 
 Removing roughly one percent of per-frame CPU from flight did not move the motion
 oracle: 6 of 6 samples still inside the recorded tolerances. The fixture was
 recorded from the bank-0 fallback, which does have music in flight, so this was
 the change most at risk of drifting and it did not.
+
+### The third voice is a chord tone, not a delay line
+
+The first version of the third voice replayed the melody note from four steps
+back. A bar is eight steps, so half of every echo hit belonged to the *previous*
+chord. Reconstructing the note stream from a VICE `-sounddev dump` capture of the
+title showed three close clashes in the 24 seconds that actually played,
+including a C4-against-D4 major second on the opening chord and a D4-against-Eb4
+minor second on the Bb downbeat. The tune was also thin for the opposite reason:
+at any instant the sounding set was a root, a melody note and a stale melody
+note, so a triad never deliberately sounded.
+
+Voice 3 now indexes two positions ahead *inside the current chord group*. Every
+note it plays is therefore a chord tone of the chord already sounding, at no
+table cost. It retriggers on alternate steps with a high sustain, so it behaves
+as a pad rather than a pluck. Re-capturing the dump gives 0 clashes, and moments
+such as Bb1 / D4 / F3 are complete triads.
+
+Because the pad only fires on even steps, that index reduces to `step EOR 2`:
+with bit 0 always clear, flipping bit 1 swaps position 0 and position 2 of the
+four-step group and can never cross into the next chord. That replaced a masked
+`AND`/`ORA` sequence and a scratch byte, reclaiming 13 bytes — which is what paid
+for the twelve-entry bass table below.
+
+Beat 3 of each theme bar is a `$00` sentinel (hold the ringing note) and beat 7 a
+`$01` sentinel (gate down and stay down). No sounding note has a high byte below
+`$08`, so the tables carry both without extra storage. Those gaps, plus a bass
+that now pulses on the two strong beats and decays to a sustain of 2, are what
+supply the space between notes. The pad path treats either sentinel as "keep
+sustaining", so the harmony never drops out under a rest.
+
+### Tempo and the 50 Hz that never existed
+
+The player used to branch on `$02A6` and load 24 ticks for PAL "at 50 Hz" or 28
+for NTSC. The KERNAL interrupt is CIA-driven at 60 Hz on *both* machines, so the
+branch made NTSC 17 percent slower rather than compensating for anything, and the
+real step was 0.400 s rather than the 0.48 s the comment claimed. Both paths
+collapse into `step_ticks`, and BPM is simply `3600/step_ticks`. The tune now
+runs at 22 ticks — 0.367 s per beat, 164 BPM. 24 ticks is 150 BPM; 29 ticks is
+124.1 BPM and is the only integer tick count inside a 122–126 BPM window.
+
+Sequence length dropped from 80 steps to 48. The old reprise folded back onto the
+theme table, but the reprise was never reached in full, so the fold routine and
+four bass table entries went with it. Theme plus bridge is one 17.6 s loop at 22
+ticks.
+
+### Pace came from harmonic rhythm, not tempo
+
+The tune read as slow at 150 BPM, which is already fast in beat terms. The cause
+was that the chord changed only once every eight beats — one chord per 3.2 s — so
+raising the tempo alone would barely have moved it. `steps_per_chord` is now 4,
+which halves that to 1.47 s and is the change that actually altered the pace.
+
+The melody could not simply be re-harmonised, because it arpeggiates a single
+triad across a whole eight-step bar: both half-bars draw on the *same* three
+notes. Each odd entry in the bass table therefore re-foots that triad rather than
+replacing it, either inverting it or extending it to a seventh, so every existing
+melody tone stays consonant:
+
+| Beats | 0–3 | 4–7 | 8–11 | 12–15 | 16–19 | 20–23 | 24–27 | 28–31 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Bass | C2 | Eb2 | Ab1 | F1 | Eb2 | C2 | Bb1 | G1 |
+| Chord | Cm | Cm/Eb | Ab | Fm7 | Eb | Cm7 | Bb | Gm7 |
+
+The bridge follows the same rule: C2, Eb2, C2, G1 under its ascent, ending on the
+dominant so the loop back to C2 resolves. `sweep_steps` stays at 8 so the filter
+keeps its original depth and period rather than shrinking with the chord; the
+measured sweep is 2.934 s against an 8-beat span of 2.933 s. The re-captured dump
+reports 0 clashes across 25 pad hits, bass fires every 1.467 s, and every fire is
+a new note rather than a repeat of the previous bar's root.
+
+### The title is timed to the song, not a fixed 20 s
+
+The attract timeout used to be a hardcoded `iftt>=1200` (1200 jiffies = 20 s) with
+a literal "attract mode in 20 seconds" caption, neither tied to the music. The
+song is now the clock. The player publishes its loop length in jiffies,
+`sequence_length * step_ticks`, as a `.word` assembled directly behind the two-
+entry jump table, at the fixed address `$4206/$4207`. Nothing executes those two
+bytes; entry is only through `SYS 16896`/`16899`. Line 1072 reads
+`sl=PEEK(16902)+PEEK(16903)*256`, prints `INT(sl/60+.5)` for the caption, and
+line 1088 waits for `tt>=sl`. At 22 ticks that is 1056 jiffies and the caption
+reads "18 seconds"; the smoke screenshot confirms it. The idle-defer behaviour is
+unchanged — any key or joystick input still resets `t0` — so an active player
+never drops to attract; only the deadline moved from an arbitrary 20 s to exactly
+one pass of the tune. Because the constant is assembled from the tempo and length
+symbols, flipping `step_ticks` to 29 for 124 BPM lengthens both the song and the
+title window to 23.2 s with no BASIC edit.
+
+### The cutoff sweep is locked to the bar
+
+The sweep ran a free 4.8-second cycle against a 3.2-second bar, a 3:2 ratio that
+never aligns, and the bridge pinned the filter wide open and jumped the
+resonance. `cutoff_max` is now `cutoff_min + step_ticks * 4`, which is a half bar
+of frames, and the bridge special case is gone. Each turn of the sweep costs one
+frame, so the downbeat also re-anchors `filt` and `filt_dir`; measured from the
+dump, the sweep period is 3.200 s against a 3.200 s bar, and it stays exact if
+`step_ticks` changes.
+
+### Entropy collection has to precede the music
+
+`src/rng.s` commandeers SID voice 3, writing `$FF` to `$D40E`/`$D40F` and noise
+to `$D412`, then reads `$D41B` for ~3.2 s. Line 30 called `SYS 16896` first, so
+the music IRQ rewrote `$D412` back to pulse on the very next frame and the
+collector spent its entire run reading a pulse oscillator at melody frequency
+instead of noise. Line 30 now reads `sys17408:sys16896:...`, which also means the
+soundtrack starts exactly when the title appears rather than 3.2 s earlier.
 
 ## Orbiting command module
 
@@ -480,7 +585,7 @@ well clear of the music player at `$4200`.
 | `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 96 of 96 checks, including the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
 | Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
-| `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 20 seconds` |
+| `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 18 seconds` |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |
 
 ## Load cost of the promoted package

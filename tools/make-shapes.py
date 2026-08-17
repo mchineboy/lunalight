@@ -10,6 +10,14 @@ rests on the pad line.
 Slot 244 is the orbiting command module, drawn side-on: docking probe and
 conical capsule at the left, service module body, flared engine bell at the
 right. It is purely cosmetic and centred on art row 10.
+
+Slot 245 is the flag's pennant field: a solid block covering exactly the
+pennant's bounding box in slot 243. It is displayed on sprite 5, one priority
+step behind the flag on sprite 4, so the outline, emblem and mast read as a
+second colour over the field. This is the same two-sprite layover the Earth
+decoration uses with slots 253 and 254, and it borrows that palette: white
+detail over blue. The mast stays out of this shape so it is drawn in the front
+sprite's lighter colour against the black sky.
 """
 import sys
 from pathlib import Path
@@ -62,7 +70,31 @@ MODULE = [
     "........................",
 ]
 
-SHAPES = {243: FLAG, 244: MODULE}
+FIELD = [
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    ".#######################",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+]
+
+SHAPES = {243: FLAG, 244: MODULE, 245: FIELD}
 
 
 def patch(body: bytearray, base: int, slot: int, art: list[str]) -> None:

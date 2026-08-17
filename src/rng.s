@@ -12,9 +12,18 @@
 ;                           (~3.2s at 10 ticks/sec), then refill
 ;   $4403 / 17411  refill   regenerate the table from the current state
 ;   $4406 / 17414  stir     absorb one cheap sample; call on human input
+;   $440C / 17420  wait     block for ($02A7) jiffies on the KERNAL clock
 ;   $4800 / 18432  table    1024 random bytes for BASIC to PEEK
 ;
 ; Commandeers CIA2 timer B and SID voice 3. Intended for terrain seeding.
+;
+; The wait entry gives a fixed wall-clock delay independent of the BASIC
+; compiler: empty FOR loops measure CPU work, so Blitz and MOSpeed time them
+; differently (and MOSpeed's optimiser deletes them outright). Reading the
+; jiffy clock instead makes every pause identical. BASIC: POKE 679,n : SYS 17420.
+
+JIFFY = $A2                    ; KERNAL jiffy clock, low byte (updated each IRQ)
+WAITJ = $02A7                  ; free RAM; BASIC pokes jiffies-to-wait here
 
 .setcpu "6502"
 
@@ -49,6 +58,7 @@ NUM_SAMPLES  = 32
     jmp refill
     jmp stir
     jmp starttod
+    jmp wait
 
 ; --------------------------------------------------------------- starttod ---
 ; A write to the hours register halts the TOD and only a write to tenths
@@ -173,6 +183,27 @@ stir:
     eor VIC_RASTER
     eor SID_OSC3
     jmp mix
+
+; ------------------------------------------------------------------- wait ---
+; Block for WAITJ jiffies. Each jiffy is one increment of the KERNAL clock's
+; low byte, detected by watching for it to change, which is wrap-safe and needs
+; no multi-byte arithmetic. Any active IRQ that advances the jiffy clock (the
+; KERNAL default or the title music player) drives it; a zero count returns at
+; once.
+
+wait:
+    lda WAITJ
+    beq wdone
+    tax
+wtick:
+    lda JIFFY
+wsame:
+    cmp JIFFY
+    beq wsame
+    dex
+    bne wtick
+wdone:
+    rts
 
 ; -------------------------------------------------------------------- mix ---
 ; state = rotl32(state,5); state += a; state += $9e3779b9; state[2] ^= a

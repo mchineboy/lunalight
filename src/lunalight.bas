@@ -1,7 +1,7 @@
   10 rem save"luna081426",8,1
   20 clr:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
   25 dimpx(5),pw(5),py(5),pb(5),rf(5),ph(5),h(39)
-  30 sys16896:sys17408:gosub1020:sys16899:gosub990
+  30 sys17408:sys16896:gosub1020:sys16899:gosub990
   40 print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
   50 t1$="{rvon}vel {rvof} ":t2$="{rvon}fuel{rvof} ":t3$="{rvon}horz{rvof} ":ep=250:hp=-20:lc=55296
   60 pn=34808:fe=1000:fu=fe:nm=4:nf=.:n2=25:mx=160:gosub1100:ifamthengosub1920
@@ -26,9 +26,9 @@
   182 ifp=192thenp=193:goto200
   190 ifz$="{f1}"thenpoke33792,134:poke55296,7:goto1270
   200 iffe=.goto230
-  220 if(jvand16)=.orpeek(653)thenpokev+21,159:q=8:goto240
+  220 if(jvand16)=.orpeek(653)thenpokev+21,191:q=8:goto240
   230 ifq=.thenm2=m2+.6:pokes+4,128:goto330
-  235 q=.:m2=m2+.6:pokev+21,157:pokes+4,128:goto330
+  235 q=.:m2=m2+.6:pokev+21,189:pokes+4,128:goto330
   240 pokes+24,15:pokes+5,128:pokes+6,128:pokes+1,8:pokes,200:pokes+4,129
   245 onp-186goto250,260,280,330,330,330,290,270
   250 m2=m2-.6:fe=fe-1:goto330
@@ -86,7 +86,7 @@
   706 goto720
   710 nm=nm-1:n2=n2-7:lz=.
   720 pokev+21,29:pokev+16,fm:gosub1210
-  730 pokes+4,128:forx=1to500:next
+  730 pokes+4,128:poke679,26:sys17420
   740 iflz>0thencx=px(lz)+pw(lz)*4:ifabs(pf-cx)<3thenbs=int(pb(lz)*2/3)
   752 tp=tp-abs(int(m2))*30
   753 tp=tp-abs(hm)*30
@@ -103,31 +103,31 @@
   795 ifnfgoto982
   835 ifamthengosub1920
   839 rem screen sits at $8400 inside the string heap's descent; collect here
- 840 tp=.:fu=fe:bs=.:gc=fre(.):forx=1to200:next:goto90
+ 840 tp=.:fu=fe:bs=.:gc=fre(.):poke679,10:sys17420:goto90
   900 rv=peek(rb+ri):ri=ri+1:return
   960 getz$
   970 ifz$="{f7}"thenpt=.:tp=.:nm=4:nf=.:fe=1000:n2=25:gosub986:gosub1100:goto840
   980 goto960
   982 print"{home}{down}{down}{down}{down}{down}{down}{down}{down}";spc((42-len(a$))/2);:forx=1tolen(a$):printmid$(a$,x,1);
   983 gosub990:next
-  984 forx=1to3000:next:ifnfgoto960
+  984 poke679,153:sys17420:ifnfgoto960
   986 print"{home}{down}{down}{down}{down}{down}{down}{down}{down}"bl$;:return
   990 forl=54272to54296:pokel,0:next
   1000 poke54296,10:poke54277,64:poke54273,17:poke54272,37:poke54276,17
-  1010 fort=1to20:next:poke54276,16:return
+  1010 poke679,1:sys17420:poke54276,16:return
   1020 am=.:print"{clr}":poke53280,11:poke53281,0
   1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
   1040 poke214,16:print:print"{lblu}   public domain 2024 steven hardison"
   1050 print"{down}";
   1060 printtab(11);
   1070 print"press {rvon}f7{rvof} to start"
-  1072 printtab(7)"{lblu}attract mode in 20 seconds"
+  1072 sl=peek(16902)+peek(16903)*256:printtab(7)"{lblu}attract mode in"int(sl/60+.5)"seconds"
   1074 t0=ti
   1080 getf$:iff$="{f7}"thenreturn
   1082 iff$<>""thent0=ti
   1084 if(peek(56320)and31)<>31thent0=ti
   1086 tt=ti-t0:iftt<.thentt=tt+5184000
-  1088 iftt>=1200thenam=1:return
+  1088 iftt>=slthenam=1:return
   1090 goto1080
   1100 print"{clr}":pokev+21,0:sys17411:ri=.:tc=12:td=11
   1102 hh=3:sg=.
@@ -168,12 +168,13 @@
   1192 fori=1to5:cs=int((px(i)-24)/8):ce=cs+pw(i)-1:ln=13-ph(i):pk=sn+ln*40
   1195 forc=cstoce:pokepk+c,100:pokepk+c+bc,5:nextc
   1196 pokepk+cs+bc,7:pokepk+ce+bc,7:nexti
-  1197 fx=px(rz)-3:fm=.:iffx>255thenfm=16:fx=fx-256
-  1198 fh=99+fm:fy=py(rz)-7:gosub1210
+  1197 fx=px(rz)-3:fm=.:iffx>255thenfm=48:fx=fx-256
+  1198 fh=3+fm:fy=py(rz)-7:gosub1210
   1200 poke56295,14:poke34791,160:print"{home}":return
-  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,14:pokev+23,.:pokev+28,.
-  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or128
-  1213 rem line 720 clears the lander x-msb; restore it so it stays on the pad
+  1210 poke34812,243:pokev+8,fx:pokev+9,fy:pokev+43,1:pokev+23,.:pokev+28,.
+  1211 poke34813,245:pokev+10,fx:pokev+11,fy:pokev+44,6
+  1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or160
+  1213 rem or160 re-arms the field and module bits 720 clears; 1214 the lander msb
   1214 ife2thenpokev+16,peek(v+16)or1
   1215 return
   1270 getz$
@@ -191,7 +192,7 @@
  1370 pokev+16,xb:pokev+14,pl:pokev+13,po+10:pokev+8,pl:pokev+11,po-10:pokev+21,252
   1380 pokev+28,240:pokev+37,11:pokev+38,2:pokev+39,0:pokev+40,0
   1390 forex=203to212:pokepn+4,ex:pokepn+5,ex+10:pokepn+6,ex+20:pokepn+7,ex+30
-  1400 pokes+24,212-ex:pokes+4,129:pokes+5,15:pokes+1,5:pokes,20:ford=1to100:next:nextex
+  1400 pokes+24,212-ex:pokes+4,129:pokes+5,15:pokes+1,5:pokes,20:poke679,6:sys17420:nextex
   1410 pokes+4,0:pokes+5,0:pokev+1,12:pokev+21,12
   1420 goto710
   1500 poke214,23:print:print"{rvon}{lblu}                                       ";

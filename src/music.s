@@ -4,13 +4,15 @@
 ; The tune belongs to the title screen only, so flight and attract mode run with
 ; the KERNAL IRQ restored and the SID free for engine and explosion effects.
 ;
-; Voice 1  triangle bass, one chord root per eight-step bar.
-; Voice 2  sawtooth melody under a continuous low-pass cutoff sweep.
-; Voice 3  pulse echo, the melody note from four steps back, plucked on alternate
-;          steps so the arpeggio gains movement instead of a second lead line.
+; Voice 1  triangle bass, plucked once per chord and allowed to decay away, so
+;          the low end punctuates instead of droning.
+; Voice 2  sawtooth melody under a low-pass cutoff sweep locked to the harmony.
+; Voice 3  pulse pad holding a tone of the chord now sounding, which is what
+;          fills the harmony out into an audible triad.
 ;
-; The 32-step C-minor theme leads to a 16-step octave-up bridge, then returns for
-; a full 32-step reprise (~38s total).
+; The 32-step C-minor theme leads to a 16-step octave-up bridge and then loops.
+; At 22 ticks per step that is 17.6s, and the title reads the loop length below
+; so its attract hand-off stays tied to the music.
 
 .setcpu "6502"
 
@@ -36,19 +38,42 @@ sid_voice3_sr      = $d414
 sid_cutoff_hi      = $d416
 sid_res_route      = $d417
 sid_mode_vol       = $d418
-pal_flag           = $02a6
 irq_vector         = $0314
 
-cutoff_min = $60
-cutoff_max = $f0
+; The KERNAL interrupt is CIA-driven at 60Hz on PAL as well as NTSC, so a single
+; constant serves both machines and one step is one beat:
+;   22 ticks = 0.367s = 164 BPM   (current)
+;   24 ticks = 0.400s = 150 BPM
+;   29 ticks = 0.483s = 124 BPM   (only integer tick count inside 122-126 BPM)
+step_ticks      = 22
 
-theme_length    = 32
-bridge_end      = 48
-sequence_length = 80
+; The chord turns over every four beats. The melody arpeggiates one triad across
+; a whole eight-step bar, so each half-bar is re-footed under a bass note that
+; keeps every melody tone consonant: the second half of each bar either inverts
+; the triad or turns it into a seventh chord.
+steps_per_chord = 4
+sweep_steps     = 8
+sequence_length = 48
+
+; One full up-and-down sweep every sweep_steps beats, so the filter moves with
+; the harmony rather than drifting against it.
+cutoff_min = $60
+cutoff_max = cutoff_min + step_ticks * (sweep_steps / 2)
+
+; Melody table sentinels. No sounding note has a high byte below $08.
+note_hold = $00
+note_rest = $01
 
 ; SYS entry points; their addresses are part of the BASIC contract.
     jmp install
     jmp uninstall
+
+; One song loop in jiffies (sequence_length * step_ticks), published at a fixed
+; address immediately after the jump table so the title can time its attract
+; hand-off to the music: PEEK(16902)+PEEK(16903)*256. Assembled from the tempo
+; and length constants, so the title stays in sync if either changes.
+loop_jiffies:
+    .word sequence_length * step_ticks
 
 install:
     lda installed
@@ -69,7 +94,12 @@ install:
     sta filt_dir
     lda #$00
     sta note_index
-    sta bridge_mode
+    lda #$10                   ; gates down until the first step loads a note
+    sta ctrl1
+    lda #$20
+    sta ctrl2
+    lda #$40
+    sta ctrl3
     lda #cutoff_min
     sta filt
     cli
@@ -97,7 +127,7 @@ silence_loop:
     rts
 
 play_irq:
-    ; --- Slow low-pass cutoff sweep, every frame for smooth motion. ---
+    ; --- Cutoff sweep, one cycle per bar, stepped every frame for smoothness.
     lda filt_dir
     beq sweep_down
     inc filt
@@ -115,28 +145,21 @@ sweep_down:
     lda #$01
     sta filt_dir
 sweep_write:
-    lda bridge_mode
-    beq theme_filter
-    lda #cutoff_max            ; bridge: fully open and more resonant
-    sta sid_cutoff_hi
-    lda #$32
-    bne filter_route
-theme_filter:
     lda filt
     sta sid_cutoff_hi
-    lda #$12
-filter_route:
-    sta sid_res_route          ; light resonance, route the melody only
+    lda #$22                   ; light resonance, route the melody only
+    sta sid_res_route
     lda #$1f                   ; low-pass on, master volume 15
     sta sid_mode_vol
 
     ; Gates are held on here and dropped for a single frame by the sequencer,
-    ; which articulates each note without restarting the envelope mid-step.
-    lda #$11
+    ; which articulates a note without restarting the envelope mid-step. A
+    ; resting voice keeps its gate down because the held value has bit 0 clear.
+    lda ctrl1
     sta sid_voice1_ctrl
-    lda #$21
+    lda ctrl2
     sta sid_voice2_ctrl
-    lda #$41
+    lda ctrl3
     sta sid_voice3_ctrl
 
     ; --- Note sequencer advances once per step. ---
@@ -144,59 +167,57 @@ filter_route:
     beq next_step
     jmp chain_irq
 next_step:
-    lda pal_flag
-    beq ntsc_tempo
-    lda #$18                   ; PAL 50Hz: 24 frames per step (~0.48s)
-    bne set_tempo
-ntsc_tempo:
-    lda #$1c                   ; NTSC 60Hz: 28 frames per step (~0.47s)
-set_tempo:
+    lda #step_ticks
     sta tempo
-
-    ldx note_index
-    cpx #theme_length
-    bcc theme_note
-    cpx #bridge_end
-    bcs theme_note
-    lda #$01
-    bne save_mode
-theme_note:
-    lda #$00
-save_mode:
-    sta bridge_mode
 
     ; Envelopes are restored on every step rather than once at install, so a
     ; caller that wipes the SID between notes only loses one step of tone.
-    lda #$08                   ; bass: instant attack, medium decay
+    lda #$0a                   ; bass: instant attack, long decay
     sta sid_voice1_ad
-    lda #$a8                   ; bass: strong sustain, ~300ms release
+    lda #$28                   ; bass: low sustain, so each pulse breathes
     sta sid_voice1_sr
     lda #$40                   ; melody: gentle attack, no decay
     sta sid_voice2_ad
     lda #$f8                   ; melody: full sustain, ~300ms release
     sta sid_voice2_sr
-    lda #$07                   ; echo: instant attack, short decay
+    lda #$2a                   ; pad: soft attack, long decay
     sta sid_voice3_ad
-    lda #$08                   ; echo: no sustain, so each hit plucks
+    lda #$a9                   ; pad: high sustain, so the chord stays under
     sta sid_voice3_sr
-    lda #$04                   ; echo: 25% pulse width
+    lda #$08                   ; pad: 50% pulse
     sta sid_voice3_pw+1
 
-    txa
-    tay
-    jsr fold
-    lda frequency_hi,y
+    ldx note_index
+    lda frequency_hi,x
+    beq melody_done            ; note_hold: let the previous note ring on
+    cmp #note_rest
+    bne melody_note
+    lda #$20                   ; note_rest: gate down and left down
+    sta ctrl2
+    sta sid_voice2_ctrl
+    jmp melody_done
+melody_note:
     sta sid_voice2_freq+1
-    lda frequency_lo,y
+    lda frequency_lo,x
     sta sid_voice2_freq
+    lda #$21
+    sta ctrl2
     lda #$20
     sta sid_voice2_ctrl
+melody_done:
 
-    txa                        ; bass changes on bar lines only
-    and #$07
+    txa                        ; bass pulses once per chord
+    and #steps_per_chord - 1
     bne skip_bass
+    txa                        ; each turn costs the sweep a frame, so re-anchor
+    and #sweep_steps - 1       ; it on the downbeat rather than let it drift
+    bne skip_sweep_reset
+    lda #cutoff_min
+    sta filt
+    lda #$01
+    sta filt_dir
+skip_sweep_reset:
     txa
-    lsr
     lsr
     lsr
     tay
@@ -204,27 +225,31 @@ save_mode:
     sta sid_voice1_freq+1
     lda bass_lo,y
     sta sid_voice1_freq
+    lda #$11
+    sta ctrl1
     lda #$10
     sta sid_voice1_ctrl
 skip_bass:
-    txa                        ; echo plucks on alternate steps
+
+    txa                        ; pad moves on alternate steps
     and #$01
-    bne skip_echo
-    txa
-    sec
-    sbc #$04
-    bcs echo_index
-    adc #sequence_length       ; carry is clear here, so this wraps exactly
-echo_index:
-    tay
-    jsr fold
+    bne skip_pad
+    txa                        ; two positions ahead inside the current chord, so
+    eor #$02                   ; the pad is always a tone of the chord sounding.
+    tay                        ; Only exact because the pad fires on even steps:
+                               ; that keeps the flip inside one steps_per_chord
+                               ; group instead of crossing into the next chord.
     lda frequency_hi,y
+    cmp #note_rest + 1         ; a sentinel just leaves the pad sustaining
+    bcc skip_pad
     sta sid_voice3_freq+1
     lda frequency_lo,y
     sta sid_voice3_freq
+    lda #$41
+    sta ctrl3
     lda #$40
     sta sid_voice3_ctrl
-skip_echo:
+skip_pad:
 
     inx
     cpx #sequence_length
@@ -236,54 +261,48 @@ save_index:
 chain_irq:
     jmp (old_irq)
 
-; The reprise replays the theme, so the note tables stop after the bridge and
-; steps 48-79 fold back onto steps 0-31.
-fold:
-    cpy #bridge_end
-    bcc fold_done
-    tya
-    sbc #bridge_end            ; carry is set by the comparison above
-    tay
-fold_done:
-    rts
-
-; Main theme: flowing C-minor melody, one bar per chord, eight notes each.
-;   Cm : C4 Eb4 G4 Eb4 C4 G3 Eb3 G3
-;   Ab : Ab3 C4 Eb4 C4 Ab3 Eb3 C3 Eb3
-;   Eb : Eb4 G4 Bb4 G4 Eb4 Bb3 G3 Bb3
-;   Bb : D4 F4 Bb4 F4 D4 Bb3 F3 G3
+; Main theme: flowing C-minor melody, one bar per chord, eight beats each. Beat
+; 3 of every bar holds the peak and beat 7 rests, which is what opens the gaps
+; the pad and the decaying bass sit in.
+;   Cm : C4  Eb4 G4  -   C4 G3  Eb3 .
+;   Ab : Ab3 C4  Eb4 -   Ab3 Eb3 C3 .
+;   Eb : Eb4 G4  Bb4 -   Eb4 Bb3 G3 .
+;   Bb : D4  F4  Bb4 -   D4  Bb3 F3 .
 frequency_lo:
     ; THEME
-    .byte $67,$b2,$13,$b2, $67,$0a,$59,$0a
-    .byte $d0,$67,$b2,$67, $d0,$59,$b4,$59
-    .byte $b2,$13,$02,$13, $b2,$81,$0a,$81
-    .byte $89,$3b,$02,$3b, $89,$81,$9d,$0a
-    ; BRIDGE: C5 -> G6 ascent, with the peak held before the octave drop
+    .byte $67,$b2,$13,$00, $67,$0a,$59,$00
+    .byte $d0,$67,$b2,$00, $d0,$59,$b4,$00
+    .byte $b2,$13,$02,$00, $b2,$81,$0a,$00
+    .byte $89,$3b,$02,$00, $89,$81,$9d,$00
+    ; BRIDGE: C5 -> G6 ascent, unbroken so it reads as a build
     .byte $ce,$64,$26,$9c, $64,$26,$04,$9c
     .byte $26,$04,$9c,$c8, $9c,$c8,$4c,$4c
 frequency_hi:
     ; THEME
-    .byte $11,$14,$1a,$14, $11,$0d,$0a,$0d
-    .byte $0d,$11,$14,$11, $0d,$0a,$08,$0a
-    .byte $14,$1a,$1f,$1a, $14,$0f,$0d,$0f
-    .byte $13,$17,$1f,$17, $13,$0f,$0b,$0d
+    .byte $11,$14,$1a,$00, $11,$0d,$0a,$01
+    .byte $0d,$11,$14,$00, $0d,$0a,$08,$01
+    .byte $14,$1a,$1f,$00, $14,$0f,$0d,$01
+    .byte $13,$17,$1f,$00, $13,$0f,$0b,$01
     ; BRIDGE
     .byte $22,$29,$34,$45, $29,$34,$3e,$45
     .byte $34,$3e,$45,$52, $45,$52,$68,$68
 sequence_end:
 
-.assert (frequency_hi - frequency_lo) = bridge_end, error, "melody low table"
-.assert (sequence_end - frequency_hi) = bridge_end, error, "melody high table"
+.assert (frequency_hi - frequency_lo) = sequence_length, error, "melody low table"
+.assert (sequence_end - frequency_hi) = sequence_length, error, "melody high table"
 
-; Chord roots, one per bar: Cm Ab Eb Bb | bridge C, G | Cm Ab Eb Bb
+; Bass note per chord, one every four beats. The melody arpeggiates a single
+; triad per bar, so the odd entries re-foot that same triad rather than fight it:
+;   C2  Eb2 | Ab1 F1  | Eb2 C2  | Bb1 G1  | C2  Eb2 | C2  G1
+;   Cm  Cm/Eb  Ab  Fm7   Eb  Cm7   Bb  Gm7   Cm  Eb6    Cm7 Cm/G
 bass_lo:
-    .byte $59,$74,$2c,$e0, $59,$42, $59,$74,$2c,$e0
+    .byte $59,$2c, $74,$e7, $2c,$59, $e0,$42, $59,$2c, $59,$42
 bass_hi:
-    .byte $04,$03,$05,$03, $04,$03, $04,$03,$05,$03
+    .byte $04,$05, $03,$02, $05,$04, $03,$03, $04,$05, $04,$03
 bass_end:
 
-.assert (bass_hi - bass_lo) = sequence_length / 8, error, "bass low table"
-.assert (bass_end - bass_hi) = sequence_length / 8, error, "bass high table"
+.assert (bass_hi - bass_lo) = sequence_length / steps_per_chord, error, "bass low table"
+.assert (bass_end - bass_hi) = sequence_length / steps_per_chord, error, "bass high table"
 
 installed:
     .byte $00
@@ -291,11 +310,15 @@ tempo:
     .byte $01
 note_index:
     .byte $00
+ctrl1:
+    .byte $10
+ctrl2:
+    .byte $20
+ctrl3:
+    .byte $40
 filt:
     .byte cutoff_min
 filt_dir:
     .byte $01
-bridge_mode:
-    .byte $00
 old_irq:
     .word $ea31

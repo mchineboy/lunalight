@@ -63,8 +63,8 @@ Added by the promotion (all verified, see below):
 | Feature | Implementation |
 | ------- | -------------- |
 | VIC bank 2 | `$DD00` low bits `01`, `poke648,132`, `$D018=$14`; screen `$8400`, pointers `$87F8`, sprites rebased to `$AE7C` |
-| Title soundtrack | Three voices: triangle bass on the chord root, sawtooth melody under a low-pass cutoff sweep, and a pulse echo of the melody four steps back. `SYS 16896` installs the player embedded at `$4200-$43E5`; `SYS 16899` restores the KERNAL IRQ and silences the SID, so flight and attract run without music and leave the chip to the engine and explosion effects |
-| RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)` |
+| Title soundtrack | Three voices: triangle bass plucked once per chord and left to decay, sawtooth melody under a low-pass cutoff sweep locked to the harmony, and a pulse pad holding a tone of the chord now sounding. One step is one beat at 22 ticks of the 60 Hz KERNAL interrupt (164 BPM), and the chord turns over every 4 beats; the 32-step C-minor theme plus 16-step bridge is one 17.6 s loop. `SYS 16896` installs the player embedded at `$4200-$43F0`; `SYS 16899` restores the KERNAL IRQ and silences the SID, so flight and attract run without music and leave the chip to the engine and explosion effects. The player also publishes its loop length in jiffies (`sequence_length * step_ticks`) as a `.word` at `$4206/$4207`, read as `PEEK(16902)+PEEK(16903)*256`, so the title's attract timeout equals one song pass and tracks any tempo or length change |
+| RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)`. Line 30 must call it **before** `SYS 16896`: the collector commandeers SID voice 3 for oscillator noise, and the music player rewrites `$D412` every frame |
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
 | Landing pads | Five generated pads, always four glyphs (32 pixels) wide, with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The fixed width gives the 24-pixel LEM four pixels of visual clearance on each side, including inset pads. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
@@ -72,7 +72,7 @@ Added by the promotion (all verified, see below):
 | Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
-| Attract mode | 20 seconds idle on the title screen starts a float autopilot demo; any key or joystick input returns to the title. The demo never writes the high score. Each flight uses the normal `ep`/`hp` spawn and momentum sequence and selects a random pad without immediately repeating one. It crosses high, releases into a ballistic dive 90 pixels out, and finishes with one continuous late burn that bends onto the pad. The first three approaches aim at the centre for the bonus; every fourth deliberately aims just outside the left edge and crashes, demonstrating failure at an exact 25% cadence. It diverts to the refuel pad below 400 fuel |
+| Attract mode | One title-song loop of idle (17.6 s at 164 BPM, read from the player's published loop length) starts a float autopilot demo; any key or joystick input defers it. The demo never writes the high score. Each flight uses the normal `ep`/`hp` spawn and momentum sequence and selects a random pad without immediately repeating one. It crosses high, releases into a ballistic dive 90 pixels out, and finishes with one continuous late burn that bends onto the pad. The first three approaches aim at the centre for the bonus; every fourth deliberately aims just outside the left edge and crashes, demonstrating failure at an exact 25% cadence. It diverts to the refuel pad below 400 fuel |
 
 The original sprite payload, the physics constants, the oracle tolerances and the
 motion fixture are unchanged by the promotion. Only the sprite payload’s **load
@@ -98,6 +98,8 @@ Requires `petcat`, `x64sc`, `c1541` (VICE), and `ca65`/`ld65` (cc65). The
 original Blitz compile also needs the tracked disk
 [`tools/BLITZ.d64`](tools/BLITZ.d64).
 
+Windows setup, including WSL2, VICE, and Cursor: [docs/windows-setup.md](docs/windows-setup.md).
+
 ### Canonical (promoted bank-2, original Blitz!)
 
 ```bash
@@ -122,7 +124,7 @@ The canonical load image spans `$0801-$C073`, so a single `,8,1` load moves abou
 47 KB over the serial bus — roughly three times the bank-0 fallback. Measured with
 `-warp`: still loading at 110,000,000 cycles, title screen up at 130,000,000.
 `SMOKE_CYCLES` is therefore 135,000,000, which lands inside the title's
-20-second window before attract mode starts, and `BENCH_CYCLES` is 200,000,000 so
+~18-second song-loop window before attract mode starts, and `BENCH_CYCLES` is 200,000,000 so
 the unwarped run covers the load, the title and normal-speed attract flight (about
 100 s of wall clock, since the SID dump device does not throttle to 100%). Decode
 any screenshot with
@@ -178,6 +180,13 @@ around `$4200-$4BFF`; packaging fills those holes and appends sprites at
 `$AE7C`. MOSpeed remains an alternate compiler and does not replace the
 original-Blitz shipping artifact.
 
+Every in-game pause (landing, between rounds, score display, sound envelope and
+each explosion frame) is a fixed jiffy-clock delay via the `wait` entry in
+[`src/rng.s`](src/rng.s) (`POKE 679,n:SYS 17420`), not an empty `FOR` loop. Empty
+loops measure CPU work, so Blitz and MOSpeed would time them differently and
+MOSpeed's optimizer would delete them entirely; reading the KERNAL jiffy clock
+makes the pauses identical under both compilers.
+
 Interpreted BASIC and Reblitz remain archived bank-0 lineage paths.
 
 | Target | Output | Notes |
@@ -210,7 +219,7 @@ CPU-side load image, single `,8,1` load:
 | --- | --- |
 | `$0801`–`$361A` | Blitz machine code (11,804-byte PRG for the promoted source) |
 | `$361B`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 3,045 bytes of headroom to the music player |
-| `$4200`–`$43E5` | Three-voice title soundtrack player; 26 bytes of slack before the RNG |
+| `$4200`–`$43F0` | Three-voice title soundtrack player (loop length published at `$4206/$4207`); 15 bytes of slack before the RNG |
 | `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
 | `$8400`–`$87FF` | Screen matrix and sprite pointers, also seen by the VIC below |
@@ -235,7 +244,7 @@ runs past `$C000`, outside the bank; every pointer the game actually uses
 checks. `tools/embed-sprites.py` fails the build if segments would overlap.
 
 The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
-`$2E7C-$4073`, music `$4200-$43E5`, screen `$0400`, pointers `$07F8`.
+`$2E7C-$4073`, music `$4200-$43F0`, screen `$0400`, pointers `$07F8`.
 
 ## Verification workflow
 
