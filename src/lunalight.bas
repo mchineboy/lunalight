@@ -85,7 +85,7 @@
   690 next
   700 iflz=.thenxz=1:goto1320
   705 ifrf(lz)<>.andfe<=399thenfe=1000:e7=1
-  706 goto720
+  706 gosub1700:goto720
   710 nm=nm-1:n2=n2-7:lz=.
   720 pokev+21,29:pokev+16,fm:gosub1210
   730 pokes+4,128:poke679,26:sys17420
@@ -248,6 +248,8 @@
   1980 ifz$="{rght}"thenjv=(jvand16)+7
   1982 ifz$="{down}"thenjv=(jvand16)+11
   1984 return
+  1700 pokepn+6,251:pokev+12,pp:pokev+13,po:pokev+45,15
+  1705 pokev+21,peek(v+21)or64:poke679,10:sys17420:return
   2100 rem crash consequences; restore indexes these by jiffy
   2102 data"salvage crews found one boot"
   2104 data"houston is billing your estate"

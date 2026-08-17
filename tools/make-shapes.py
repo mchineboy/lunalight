@@ -19,6 +19,9 @@ decoration uses with slots 253 and 254, and it borrows that palette: white
 detail over blue. The mast stays out of this shape so it is drawn in the front
 sprite's lighter colour against the black sky.
 
+Slot 251 is the landing dust poof: a single-frame puff drawn on sprite 6 in
+place of the exhaust when the LEM touches down successfully.
+
 Slots 246-250 are black interior masks for the five reachable lander attitudes,
 in pointer order 187, 188, 189, 193 and 194. Sprite 1 draws the matching mask
 behind the lander outline on sprite 0 but ahead of every scenery sprite, keeping
@@ -195,6 +198,30 @@ LEM_FILL_193 = [
     "........................",
 ]
 
+DUST = [
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "..........####..........",
+    "........########........",
+    ".......##########.......",
+    "......############......",
+    ".....##############.....",
+    ".....##############.....",
+    "......############......",
+    ".......##########.......",
+]
+
 LEM_FILL_194 = [
     "........................",
     "........................",
@@ -228,6 +255,7 @@ SHAPES = {
     248: LEM_FILL_189,
     249: LEM_FILL_193,
     250: LEM_FILL_194,
+    251: DUST,
 }
 
 

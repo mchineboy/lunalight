@@ -69,6 +69,7 @@ LEM_FILL_ATTITUDES = dict(zip(LEM_FILL_SLOTS, (187, 188, 189, 193, 194)))
 LEM_FILL_POINTER_INDEX = 1
 LEM_FILL_SPRITE_COLOR = 0
 EXHAUST_POINTER_INDEX = 6
+DUST_SLOT = 251
 # Rows of the flag shape the pennant (and therefore the field block) occupies.
 PENNANT_ROWS = 12
 # The cosmetic orbiting command module lives on sprite 7, pointer slot 244,
@@ -79,7 +80,7 @@ MODULE_POINTER_INDEX = 7
 MODULE_SPRITE_COLOR = 15
 MODULE_SPRITE_Y = 55
 # Shapes patched into spare slots of the original payload by make-shapes.py.
-PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT, FIELD_SLOT) + LEM_FILL_SLOTS
+PATCHED_SLOTS = (FLAG_SLOT, MODULE_SLOT, FIELD_SLOT) + LEM_FILL_SLOTS + (DUST_SLOT,)
 FLIGHT_POINTERS = {
     2: 253,
     3: 254,
@@ -489,6 +490,8 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         690: "next",
         700: "iflz=.thenxz=1:goto1320",
         705: "ifrf(lz)<>.andfe<=399thenfe=1000:e7=1",
+        706: "gosub1700:goto720",
+        1700: f"pokepn+6,{DUST_SLOT}",
     }
     missing = [line for line in required if line not in variant]
     differing = [
