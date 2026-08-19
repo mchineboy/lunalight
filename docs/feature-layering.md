@@ -31,8 +31,9 @@ altered.
 | Canonical build with the flag's two-sprite colour layover | 11,829-byte PRG | `$0801-$3633` | `$41FF` | 3,020 bytes |
 | Canonical build with the tempo-derived attract deadline | 11,862-byte PRG | `$0801-$3654` | `$41FF` | 2,987 bytes |
 | Canonical build with opaque attitude-matched LEM fills and current title/attract fixes | 11,977-byte PRG | `$0801-$36C7` | `$41FF` | 2,872 bytes |
+| Canonical build with animated RAM-charset title tableau and attached exhaust | 12,778-byte PRG | `$0801-$39E8` | `$41FF` | 2,071 bytes |
 
-The last two rows were measured in this promotion run (`make blitz-bank0` and
+The last three rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
 third rows are carried forward from the earlier layering and optimization work and
 were not re-measured, so the derivations below that use the 9,675-byte figure
@@ -51,8 +52,11 @@ Derived from those measurements:
   start by **1,580 bytes**, so it cannot exist there. Reported directly by
   `tools/bank2-capacity.py` as `old_layout.headroom_bytes: -1580`.
 - The relocation raised the reachable ceiling from `$2E7B` to `$41FF`, a
-  **4,996-byte** headroom gain, and **3,416 bytes** remain free above the
-  promoted code.
+  **4,996-byte** headroom gain. At the original promotion point, **3,416 bytes**
+  remained free above the 11,433-byte code image; the current title tableau build
+  retains **2,071 bytes** before music.
+- The current code would overrun the old bank-0 sprite start by **2,925 bytes**;
+  the bank-2 relocation remains what makes the full feature set possible.
 - The integrated candidate measured during the bank-0 era was 12,316 bytes ending
   `$381A`. The promoted integrated build is **883 bytes smaller**, and the
   earlier estimate that the layer set needed roughly 2,646 additional bytes
@@ -238,10 +242,13 @@ a final input all returned to the title
 `attract.final_input_exit_returns_to_title`).
 Attract game over no longer resets lives and flies forever: line 792 clears
 `nf`, prints the shared “game over” message, and `goto20`
-(`attract.game_over_returns_to_title`). Line 20 restores bank/screen/charset but
-not `$D015`, so title re-entry used to leave the flight enable mask frozen over
-the title text; line 1020 now clears it before printing
-(`title.no_sprites_enabled_after_flight`).
+(`attract.game_over_returns_to_title`). The current title deliberately claims the
+sprites for its animated tableau: lines 1020-1028 select the `$8800` RAM character
+set, establish the title pointers and enable every tableau sprite (with sprite 6
+pulsing for the exhaust). Line 40 disables that tableau and restores the flight
+character source. The verifier checks title re-entry with
+`title.tableau_reestablished_after_flight` rather than expecting `$D015` to be
+clear.
 
 Those scores are the as-layered figures. The autopilot was reworked afterwards;
 see "Attract mode now plays to win" below.
@@ -471,14 +478,14 @@ song is now the clock. The player publishes its loop length in jiffies,
 `sequence_length * step_ticks`, as a `.word` assembled directly behind the two-
 entry jump table, at the fixed address `$4206/$4207`. Nothing executes those two
 bytes; entry is only through `SYS 16896`/`16899`. Line 1072 reads
-`sl=PEEK(16902)+PEEK(16903)*256`, prints `INT(sl/60+.5)` for the caption, and
-line 1088 waits for `tt>=sl`. At 22 ticks that is 1056 jiffies and the caption
-reads "18 seconds"; the smoke screenshot confirms it. The idle-defer behaviour is
-unchanged — any key or joystick input still resets `t0` — so an active player
-never drops to attract; only the deadline moved from an arbitrary 20 s to exactly
-one pass of the tune. Because the constant is assembled from the tempo and length
-symbols, flipping `step_ticks` to 29 for 124 BPM lengthens both the song and the
-title window to 23.2 s with no BASIC edit.
+`sl=PEEK(16902)+PEEK(16903)*256`, and line 1088 waits for `tt>=sl`. The former
+countdown caption was removed to leave room for the animated tableau. At 22 ticks
+the deadline is 1056 jiffies (17.6 seconds). The idle-defer behaviour is unchanged
+— any key or joystick input still resets `t0` — so an active player never drops to
+attract; only the deadline moved from an arbitrary 20 s to exactly one pass of the
+tune. Because the constant is assembled from the tempo and length symbols,
+flipping `step_ticks` to 29 for 124 BPM lengthens both the song and the title
+window to 23.2 s with no BASIC edit.
 
 ### The cutoff sweep is locked to the bar
 
@@ -509,8 +516,8 @@ The shape needed no new memory. Nine 64-byte slots of the original payload
 (244-252) were still empty after the flag took 243, so `tools/make-shapes.py`
 generalises the former `make-flag.py` to patch a table of slots. Slot 244
 resolves to `$BD00` in bank 2, and the flag's pennant field later took 245 at
-`$BD40`. The LEM fills later took 246-250, leaving 251-252 spare. The load image
-is still 47,221 bytes and the
+`$BD40`. The LEM fills later took 246-250, and landing dust takes 251; only slot
+252 remains spare. The load image is still 47,221 bytes and the
 embed layout is unchanged; only 63 zero bytes inside the payload became shape
 data. `static.only_patched_slots_differ_from_original` and
 `static.patched_slots_were_spare_now_hold_shapes` were generalised from their
@@ -557,13 +564,14 @@ module; the LEM fill made it `or162`.
 
 `$DD00` low bits `01` select bank 2; the screen and pointer table move to
 `$8400`/`$87F8` (`poke648,132`), and the unchanged sprite payload is rebased from
-`$2E7C` to `$AE7C`. Observed at both title and flight: `$DD00=$C5`, VIC bank
-`$8000`, `$D018=$15`, screen matrix `$8400`, character base `$9000` resolved to
-the character ROM image, `hibase=$84`.
+`$2E7C` to `$AE7C`. Both title and flight use `$DD00=$C5`, VIC bank `$8000`,
+screen matrix `$8400` and `hibase=$84`. Flight selects the character ROM at
+`$9000` with `$D018=$14` (read back as `$15`, bit 0 unused). The title instead
+selects its copied-and-patched RAM character set at `$8800` with `$D018=$12`.
+Line 40 restores the flight value before any collision-sensitive gameplay frame.
 
-`$D018` must select `$14` (reading back as `$15`, bit 0 unused). `$18` selects
-blank RAM at `$A000`, which makes the display invisible and prevents the
-sprite/background collision latch that gates landing.
+`$D018=$18` selects blank RAM at `$A000`, which makes the display invisible and
+prevents the sprite/background collision latch that gates landing.
 
 The sprite payload occupies `$AE7C-$C073`, whose tail runs past the `$BFFF` bank
 edge; every pointer the game uses spans `$AEC0-$BFBF`, inside the bank
@@ -639,15 +647,15 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code | `$0801-$36C7` | 11,975 loaded bytes |
-| Zero-filled runtime workspace for BASIC's variables | `$36C8-$3CC7` | 1,536 |
-| `0xAA` filler through the ceiling | `$3CC8-$41FF` | 1,336 |
+| Canonical code | `$0801-$39E8` | 12,776 loaded code bytes (12,778-byte PRG) |
+| Zero-filled runtime workspace for BASIC's variables | `$39E9-$3FE8` | 1,536 |
+| `0xAA` filler through the ceiling | `$3FE9-$41FF` | 535 |
 
-The padded artifact passes the motion oracle and the full runtime suite,
-including the demo landings, and the filler above BASIC's live data reads back
-byte-intact (`capacity.free_filler_intact_above_basic_data`). The `$2E7C-$4073`
-range the sprites used to occupy is therefore genuinely available to code, not
-merely unclaimed on paper.
+The padded artifact is the input to `make verify-bank2-capacity`, which runs the
+motion oracle and full runtime suite and checks that the filler above BASIC's
+live data remains byte-intact (`capacity.free_filler_intact_above_basic_data`).
+The `$2E7C-$4073` range the sprites used to occupy is therefore genuinely
+available to code, not merely unclaimed on paper.
 
 The reserve was raised from 512 to 1,536 bytes. BASIC's live variables, arrays
 and strings grow above the code as the game runs; the startup `STREND` snapshot
@@ -655,8 +663,11 @@ and strings grow above the code as the game runs; the startup `STREND` snapshot
 filler overwrote live runtime data, perturbing emulation timing and the demo's
 descent. The larger reserve keeps the filler clear of that working set, so the
 capacity proof measures free space without disturbing the running program. It
-still demonstrates ~1.3 KB of contiguous filler plus the reserve above the code,
-well clear of the music player at `$4200`.
+still demonstrates 535 bytes of contiguous filler plus the reserve above the
+code, well clear of the music player at `$4200`. The title's separate character
+page at `$8800` does not consume this executable headroom: it is protected from
+the title's string allocations by temporarily lowering `MEMSIZ` to `$8800`, then
+flight restores the normal `$A000` ceiling.
 
 ## Verification summary
 
@@ -665,18 +676,19 @@ well clear of the music player at `$4200`.
 | `make verify-baseline` | Exact byte match: `archived/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | 105 of 105 checks passed, including four-cell pad geometry, the flag's rendered two-colour layover, attitude-matched bounded LEM fills, three clean approaches, the deliberately failed fourth approach, and string-heap reclamation |
-| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the 105-check suite, 0 gameplay failures |
-| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): 6 of 6 motion samples plus 108 of 108 checks, including bounded LEM fills, the four-attempt demo cadence and `capacity.free_filler_intact_above_basic_data` |
+| `make verify-bank2` (canonical runtime suite) | Canonical runtime gate, including the RAM title charset, its `$8800` heap guard, title tableau re-entry, four-cell pad geometry, two-colour flag layover, bounded LEM fills, attract cadence and string-heap reclamation |
+| `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the canonical runtime suite |
+| `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): motion oracle, runtime suite and `capacity.free_filler_intact_above_basic_data` |
 | Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |
 | Bank-0 collision control descent | `$D01F` union `$D1`, first latch at sprite Y 204 on `build/lunalight-bank0-blitz-full.prg` (`reference.sprite_background_collision_latched`) |
-| `make smoke` | Exit screenshot decodes to the title: `l u n a l i g h t`, `press f7 to start`, `attract mode in 18 seconds` |
+| `make smoke` | Exit screenshot captures the animated title tableau and its `press f7 to start` prompt. The chunky logo uses custom RAM character codes, so the plain screen decoder does not spell it out |
 | `make d64-boot` | `build/lunalight.d64` lists one 186-block `lunalight` PRG with 478 blocks free, autoloads, and reaches the same title screen |
 
 ## Load cost of the promoted package
 
 The canonical load image spans `$0801-$C073` (47,221 bytes) because a single
-`,8,1` load must place the code, music, RNG and the sprites at `$AE7C`. The bank-0
+`,8,1` load must place the code, music, RNG, title character set and sprites at
+their fixed addresses. The bank-0
 fallback image is 15,239 bytes. Measured under `-warp`: still loading at
 110,000,000 cycles, title screen up at 130,000,000, attract mode by 150,000,000.
 `SMOKE_CYCLES` was raised from 80,000,000 (which captured a mid-load

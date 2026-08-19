@@ -65,14 +65,15 @@ Added by the promotion (all verified, see below):
 
 | Feature | Implementation |
 | ------- | -------------- |
-| VIC bank 2 | `$DD00` low bits `01`, `poke648,132`, `$D018=$14`; screen `$8400`, pointers `$87F8`, sprites rebased to `$AE7C` |
+| VIC bank 2 | `$DD00` low bits `01`, `poke648,132`; screen `$8400`, pointers `$87F8`, sprites rebased to `$AE7C`. Flight selects the character ROM with `$D018=$14`; the title temporarily selects its RAM character set with `$D018=$12` |
 | Title soundtrack | Three voices: triangle bass plucked once per chord and left to decay, sawtooth melody under a low-pass cutoff sweep locked to the harmony, and a pulse pad holding a tone of the chord now sounding. One step is one beat at 22 ticks of the 60 Hz KERNAL interrupt (164 BPM), and the chord turns over every 4 beats; the 32-step C-minor theme plus 16-step bridge is one 17.6 s loop. `SYS 16896` installs the player embedded at `$4200-$43F0`; `SYS 16899` restores the KERNAL IRQ and silences the SID, so flight and attract run without music and leave the chip to the engine and explosion effects. The player also publishes its loop length in jiffies (`sequence_length * step_ticks`) as a `.word` at `$4206/$4207`, read as `PEEK(16902)+PEEK(16903)*256`, so the title's attract timeout equals one song pass and tracks any tempo or length change |
+| Animated title tableau | Title-only RAM characters at `$8800-$8FFF` provide the chunky logo and twinkling stars; the normal character ROM is copied underneath so the title text remains PETSCII. The title temporarily sets `MEMSIZ` to `$8800`, keeping BASIC’s descending string heap below its character page; line 40 restores `$A000` for normal gameplay. All eight sprites stage an Earth, orbiting module, bobbing LEM, exhaust and refuel flag. The title selects `$D018=$12`; line 40 disables its sprites and restores `$D018=$14` before the gameplay display and collision latch begin. |
 | RNG | `SYS 17408` collects TOD-phase entropy (~3.2 s before the title), `SYS 17411` refills the 1024-byte table at `$4800`; BASIC reads it with `PEEK(18432+ri)`. Line 30 must call it **before** `SYS 16896`: the collector commandeers SID voice 3 for oscillator noise, and the music player rewrites `$D412` every frame |
 | Procedural terrain | A random-walk height map across all 40 columns, redrawn every game, with slope smoothing around each pad |
 | Landing pads | Five generated pads, always four glyphs (32 pixels) wide, with `px`/`pw`/`py` geometry, `pb()` point values (500/600/800 by altitude band), and centre-hit bonus `pb*2/3`. The fixed width gives the 24-pixel LEM four pixels of visual clearance on each side, including inset pads. The verdict compares the lander's centre, `INT(pp)+12`, because `px()` is the sprite-X of the pad's *left* edge |
 | Refuel pad | One low pad per game carries `rf()`; landing there refills fuel to 1000 and prints “fuel tanks full” |
 | Refuel flag sprite | The flag shape is patched into the original payload’s spare slot 243 by [`tools/make-shapes.py`](tools/make-shapes.py), then the whole payload is rebased so slot 243 resolves to `$BCC0`. Drawn on sprite 4, white, unexpanded. The pennant carries an Earth wire-globe emblem, and a solid pennant field from spare slot 245 (`$BD40`) sits on sprite 5 at the same coordinates in blue, one priority step behind, so the emblem and mast read as white on blue. This is the Earth decoration’s two-sprite layover: a single sprite could only draw the outline, which read as an empty wire frame, and colours 11 and 12 are unavailable because the terrain is painted in those greys |
-| Opaque LEM interior | Five black cabin masks in spare slots 246-250 match the reachable attitudes 187, 188, 189, 193 and 194. Sprite 1 draws the selected mask behind the sprite-0 wireframe but ahead of the scenery sprites, preventing the flag or terrain from showing through while leaving the antenna and landing legs open. Exhaust moved from sprite 1 to sprite 6 |
+| Opaque LEM interior and landing dust | Five black cabin masks in spare slots 246-250 match the reachable attitudes 187, 188, 189, 193 and 194. Sprite 1 draws the selected mask behind the sprite-0 wireframe but ahead of the scenery sprites, preventing the flag or terrain from showing through while leaving the antenna and landing legs open. Spare slot 251 supplies the one-frame landing dust puff on sprite 6; sprite 6 otherwise carries exhaust |
 | Command module | A cosmetic spacecraft holding station in the sky, patched into spare slot 244 (`$BD00`) and drawn on sprite 7, light grey, at Y 55. Sprite 7 is otherwise explosion-only, so line 1212 re-establishes its pointer, colour, position and enable bit after every round. It steps 8 pixels right per round and wraps at X 240, which reads as orbital motion without costing anything in the flight loop |
 | Joystick | Port 2 (`PEEK(56320)`) for rotate and thrust, with the original keyboard controls kept as a fallback |
 | Crash post-mortem | Exactly one line per crash. An RNG-table coin flip picks either a cause line derived from the crash state (tilt, sideways, velocity, off-pad) or one of 13 `DATA` consequence lines, rotated by `PEEK(162)` |
@@ -120,9 +121,9 @@ make gif             # regenerate docs/lunalight-gameplay.gif (title + attract)
 make clean
 ```
 
-`LOAD"*",8,1` then `RUN` on the D64 (or autostart the full PRG). Sprites, music
-and the RNG are already embedded; do not use the bare `lunalight-blitz.prg` for
-play.
+`LOAD"*",8,1` then `RUN` on the D64 (or autostart the full PRG). Sprites, music,
+the RNG and the title character set are already embedded; do not use the bare
+`lunalight-blitz.prg` for play.
 
 The canonical load image spans `$0801-$C073`, so a single `,8,1` load moves about
 47 KB over the serial bus — roughly three times the bank-0 fallback. Measured with
@@ -221,14 +222,15 @@ CPU-side load image, single `,8,1` load:
 
 | Range | Contents |
 | --- | --- |
-| `$0801`–`$3654` | Blitz machine code (11,862-byte PRG for the promoted source) |
-| `$3655`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 2,987 bytes of headroom to the music player |
+| `$0801`–`$39E8` | Blitz machine code (12,778-byte PRG; 12,776 loaded code bytes) |
+| `$39E9`–`$41FF` | Free: BASIC/Blitz variables and arrays grow up from here; 2,071 bytes of headroom to the music player. The capacity proof reserves 1,536 of these bytes at runtime and verifies the remaining 535-byte filler |
 | `$4200`–`$43F0` | Three-voice title soundtrack player (loop length published at `$4206/$4207`); 15 bytes of slack before the RNG |
-| `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`) |
+| `$4400`–`$47FF` | RNG entry points (`collect`, `refill`, `stir`, `wait`); see [`docs/lunalight-bas.md`](docs/lunalight-bas.md#embedded-machine-code-modules) |
 | `$4800`–`$4BFF` | 1024-byte PRNG table BASIC PEEKs |
 | `$8400`–`$87FF` | Screen matrix and sprite pointers, also seen by the VIC below |
-| `$9FFF` downward | BASIC string heap (`MEMSIZ $A000`). The screen lies in its descent path and `STREND` is too low for BASIC to collect on its own, so line 840 forces one collection per round with `gc=fre(.)` |
-| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244, flag pennant field in slot 245 |
+| `$8800`–`$8FFF` | Title-only RAM character set: ROM-copy base plus custom logo and star glyphs |
+| `$9FFF` downward | Flight's BASIC string heap (`MEMSIZ $A000`). The screen lies in its descent path and `STREND` is too low for BASIC to collect on its own, so line 840 forces one collection per round with `gc=fre(.)`. The title temporarily lowers `MEMSIZ` to `$8800`, keeping this heap below its RAM character set |
+| `$AE7C`–`$C073` | Sprite shapes, rebased from `$2E7C`; flag in slot 243, command module in slot 244, flag pennant field in slot 245, LEM fills in 246-250 and landing dust in 251 |
 
 What the VIC sees in bank 2 (`$8000-$BFFF`):
 
@@ -236,7 +238,8 @@ What the VIC sees in bank 2 (`$8000-$BFFF`):
 | --- | --- |
 | `$8400`–`$87E7` | Screen matrix (`poke648,132`, `$D018=$14`) |
 | `$87F8`–`$87FF` | Sprite pointers |
-| `$9000`–`$97FF` | Character ROM image. `$D018` must select this; `$18` selects blank RAM at `$A000`, which makes the display invisible and prevents the sprite/background collision latch that gates landing |
+| `$8800`–`$8FFF` | Title-only RAM character set: copied ROM glyphs plus the logo and star characters, selected by `$D018=$12` |
+| `$9000`–`$97FF` | Flight character ROM image, selected by `$D018=$14`. `$18` selects blank RAM at `$A000`, which makes the display invisible and prevents the sprite/background collision latch that gates landing |
 | `$AEC0`–`$B0BF` | Lander shapes, pointers 187-194 |
 | `$B2C0`–`$BCBF` | Explosion shapes, pointers 203-242 |
 | `$BCC0`–`$BCFF` | Refuel flag, pointer slot 243 |
@@ -244,10 +247,12 @@ What the VIC sees in bank 2 (`$8000-$BFFF`):
 | `$BD40`–`$BD7F` | Refuel flag pennant field, pointer slot 245 |
 | `$BF40`–`$BFBF` | Decoration shapes, pointers 253 and 254 |
 
-`$D018` reads back as `$15` because bit 0 is unused. The sprite payload’s tail
-runs past `$C000`, outside the bank; every pointer the game actually uses
-(187-194, 203-242, 243-245, 253, 254) resolves below `$BFFF`, which the verifier
-checks. `tools/embed-sprites.py` fails the build if segments would overlap.
+During flight `$D018=$14` reads back as `$15` because bit 0 is unused. The title
+instead uses `$D018=$12` to read its RAM character set at `$8800`; line 40 restores
+the flight value before the collision-sensitive gameplay display begins. The sprite
+payload’s tail runs past `$C000`, outside the bank; every pointer the game actually
+uses (187-194, 203-242, 243-251, 253, 254) resolves below `$BFFF`, which the
+verifier checks. `tools/embed-sprites.py` fails the build if segments would overlap.
 
 The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
 `$2E7C-$4073`, music `$4200-$43F0`, screen `$0400`, pointers `$07F8`.
@@ -255,8 +260,8 @@ The bank-0 fallback keeps the original layout: code `$0801-$2DC4`, sprites
 ## Verification workflow
 
 1. `make verify-baseline` — exact tokenized match for the frozen `luna081426` text.
-2. `make` / `make blitz` — original compiler disk → `lunalight-blitz.prg` → embed music, RNG and rebased flag sprites → `lunalight-blitz-full.prg`.
-3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (title, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, the single-line crash post-mortem, attract mode with repeatable autopilot landings, string-heap reclamation between rounds, and a bank-0 control descent).
+2. `make` / `make blitz` — original compiler disk → `lunalight-blitz.prg` → embed music, RNG, the title RAM character set and rebased sprites → `lunalight-blitz-full.prg`.
+3. `make verify-blitz-gameplay` — the canonical aggregate: the six-sample motion oracle at bank-2 addresses plus the runtime suite (the RAM-charset title tableau and heap guard, HUD, procedural terrain rows, generated pads and their colour pattern, refuel flag sprite, sprite residency, BASIC memory pointers, pause tile, joystick and keyboard controls, collision latch, explosion progression, the single-line crash post-mortem, attract mode with repeatable autopilot landings, string-heap reclamation between rounds, and a bank-0 control descent).
 4. `make verify-bank2-capacity` — proves the freed region is genuinely usable: the padded artifact still passes the motion oracle and the suite, and the filler above BASIC’s live data is byte-intact.
 5. `make smoke` / `make bench` — title screenshots of the canonical artifact.
 6. `make d64` / `make d64-boot` — package `build/lunalight.d64` (one 186-block `lunalight` PRG, 478 blocks free) and boot it headless; the exit screenshot decodes to the title screen.
@@ -276,7 +281,8 @@ position drift, not feel.
 | [`tools/verify-bank2.py`](tools/verify-bank2.py) | Canonical layout and runtime suite |
 | [`tools/bank2-capacity.py`](tools/bank2-capacity.py) | Measure bank-2 headroom and emit the padded capacity artifact |
 | [`tools/rebase-prg-load.py`](tools/rebase-prg-load.py) | Change a PRG load address without touching its payload |
-| [`tools/make-shapes.py`](tools/make-shapes.py) | Write the refuel flag, command module and the flag’s pennant field into spare sprite slots 243, 244 and 245 |
+| [`tools/make-shapes.py`](tools/make-shapes.py) | Write the refuel flag, command module, flag pennant field, LEM fills and landing dust into spare sprite slots 243-251 |
+| [`tools/make-title-charset.py`](tools/make-title-charset.py) | Build the title-only `$8800` RAM character set from the C64 character ROM plus custom logo and star glyphs |
 | [`tools/vice_monitor.py`](tools/vice_monitor.py) | Shared VICE monitor helpers |
 | [`tools/embed-sprites.py`](tools/embed-sprites.py) | Merge PRG + address-sorted asset PRGs |
 | [`tools/attract-sim.py`](tools/attract-sim.py) | Python sim of the attract/terrain path |

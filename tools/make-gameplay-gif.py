@@ -22,7 +22,10 @@ from pathlib import Path
 
 from vice_monitor import ViceMonitor
 
-TITLE_NEEDLES = ("l u n a l i g h t", "press f7 to start")
+# The title logo uses custom RAM-character codes, which decode as spaces in the
+# plain screen-text reader below.  The start prompt remains ordinary PETSCII and
+# is the stable synchronisation point for capture.
+TITLE_NEEDLES = ("press f7 to start",)
 FLIGHT_NEEDLES = ("vel", "fuel", "horz")
 ATTRACT_NEEDLE = "attract"
 

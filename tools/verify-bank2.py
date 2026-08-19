@@ -24,7 +24,7 @@ from typing import Any
 
 from vice_monitor import ViceMonitor
 
-TITLE_NEEDLES = ("l u n a l i g h t", "press f7 to start")
+TITLE_NEEDLES = ("press f7 to start",)
 FLIGHT_NEEDLES = ("vel", "fuel", "horz")
 ATTRACT_NEEDLE = "attract"
 F7 = b"\x88"
@@ -55,6 +55,9 @@ PAD_EDGE_COLOR = 7
 # and attract mode leave the SID to the engine and explosion effects.
 MUSIC_START = 0x4200
 MUSIC_END = 0x4400
+TITLE_D018 = 0x12
+TITLE_CHARSET_ADDRESS = 0x8800
+TITLE_SPRITE_POINTERS = [187, 246, 253, 254, 243, 245, 195, 244]
 # The lander graphic fills its 24-pixel sprite, so its centre sits half a sprite
 # right of the $D000 value the landing verdict reads.
 SPRITE_CENTRE_OFFSET = 12
@@ -244,6 +247,19 @@ def static_layout(args: argparse.Namespace, report: Report) -> dict[str, Any]:
         },
         "flag_block_bank2_address": f"${flag_block_bank2:04X}",
     }
+
+    if args.title_charset is not None:
+        charset_addr, charset = load_prg(args.title_charset)
+        charset_offset = charset_addr - full_addr
+        resident = full[charset_offset : charset_offset + len(charset)]
+        report.equal("static.title_charset_load_address", charset_addr, TITLE_CHARSET_ADDRESS)
+        report.equal("static.title_charset_size", len(charset), 2048)
+        report.check(
+            "static.title_charset_embedded_at_$8800",
+            charset_offset >= 0 and resident == charset,
+            f"{args.title_charset.name} ${charset_addr:04X}-${charset_addr + len(charset) - 1:04X}",
+            "the complete title charset embedded at $8800",
+        )
 
     # The relocated sprite must be the original shapes with the added shapes
     # patched into spare slots, its load address moved into VIC bank 2, and
@@ -741,7 +757,12 @@ class Session:
         return path
 
 
-def check_registers(session: Session, report: Report, phase: str) -> None:
+def check_registers(
+    session: Session,
+    report: Report,
+    phase: str,
+    expected_d018: int | None = None,
+) -> None:
     monitor = session.monitor
     assert monitor is not None
     cia2 = monitor.memory_paused(0xDD00, 0xDD00)[0]
@@ -749,9 +770,9 @@ def check_registers(session: Session, report: Report, phase: str) -> None:
     hibase = monitor.memory_paused(0x0288, 0x0288)[0]
     d018 = vic[0x18]
     expected_d018 = (
-        session.args.expect_d018
-        if session.args.patch_d018 is None
-        else session.args.patch_d018
+        session.args.patch_d018
+        if session.args.patch_d018 is not None
+        else (expected_d018 if expected_d018 is not None else session.args.expect_d018)
     )
     report.equal(f"{phase}.cia2_dd00_bank_bits", cia2 & 0x03, 0x01)
     # $D018 bit 0 is unused and always reads back as 1. Compare defined bits.
@@ -952,8 +973,23 @@ def check_title(session: Session, report: Report) -> None:
         {"irq_vector": vector},
         f"$0314 inside the music player ${MUSIC_START:04X}-${MUSIC_END - 1:04X}",
     )
-    check_registers(session, report, "title")
+    check_registers(session, report, "title", TITLE_D018)
     check_character_source(session, report)
+    assert session.monitor is not None
+    title_pointers = list(
+        session.monitor.memory_paused(session.pointer_base, session.pointer_base + 7)
+    )
+    title_enable = session.monitor.memory_paused(0xD015, 0xD015)[0]
+    title_memsiz_raw = session.monitor.memory_paused(0x37, 0x38)
+    title_memsiz = title_memsiz_raw[0] | title_memsiz_raw[1] << 8
+    report.equal("title.tableau_sprite_pointers", title_pointers, TITLE_SPRITE_POINTERS)
+    report.equal("title.charset_guard_memsiz", title_memsiz, TITLE_CHARSET_ADDRESS)
+    report.check(
+        "title.tableau_sprites_enabled",
+        title_enable in (COAST_ENABLE, THRUST_ENABLE),
+        f"$D015=${title_enable:02X}",
+        f"title tableau keeps sprites 0-5 and 7 active, with sprite 6 pulsing ({COAST_ENABLE} or {THRUST_ENABLE})",
+    )
     check_rendered_pixels(session, report, "title")
     session.snapshot("title")
     report.facts["title_screen"] = [line for line in screen if line.strip()]
@@ -1183,16 +1219,14 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             [line for line in final_title if line.strip()],
             list(TITLE_NEEDLES),
         )
-        # Line 20 restores the bank, screen base and character source but not
-        # $D015, so a title re-entered from flight used to keep the demo's enable
-        # mask: lander, exhaust, Earth pair, flag pair and command module frozen
-        # over the title text. Line 1020 clears the register before it prints, so
-        # the mask must read zero by the time the title text is on screen.
+        # The title deliberately reclaims all eight sprites for its animated
+        # tableau.  A title re-entered from flight must establish that mask,
+        # rather than inheriting a frozen flight or explosion mask.
         report.check(
-            "title.no_sprites_enabled_after_flight",
-            all(mask == 0 for mask in title_sprites.values()),
+            "title.tableau_reestablished_after_flight",
+            all(mask in (COAST_ENABLE, THRUST_ENABLE) for mask in title_sprites.values()),
             {name: f"${mask:02X}" for name, mask in title_sprites.items()},
-            "$D015 zero on every title screen re-entered from the demo",
+            f"$D015={COAST_ENABLE} or {THRUST_ENABLE} on every title re-entry",
         )
         report.facts["attract"] = {
             "starts": starts,
@@ -1947,6 +1981,11 @@ def parse_args() -> argparse.Namespace:
         help="CPU-side RNG PRG expected at $4400-$4BFF",
     )
     parser.add_argument("--music-prg", type=Path)
+    parser.add_argument(
+        "--title-charset",
+        type=Path,
+        help="optional title-only RAM character set embedded at $8800",
+    )
     parser.add_argument(
         "--canonical-source",
         type=Path,

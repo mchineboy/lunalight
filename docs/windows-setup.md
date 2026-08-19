@@ -96,11 +96,14 @@ src/lunalight.bas
 
 Use lower-case BASIC source. Do not edit anything in `build/`; the next build
 recreates that folder. Before asking Cursor to make a game change, have it read
-`AGENTS.md` and `docs/feature-layering.md` first. A useful first prompt is:
+`AGENTS.md`, `docs/lunalight-bas.md`, and `docs/feature-layering.md` first. The
+first is the project's safety and build guide, the second is a beginner-friendly
+map of the BASIC source, and the third explains the memory and verification
+constraints. A useful first prompt is:
 
 ```text
-Read AGENTS.md and docs/feature-layering.md. Explain how src/lunalight.bas
-starts a round, but do not edit any files.
+Read AGENTS.md, docs/lunalight-bas.md, and docs/feature-layering.md. Explain how
+src/lunalight.bas starts a round, but do not edit any files.
 ```
 
 After a small source edit, build and test in Cursor's Ubuntu terminal:

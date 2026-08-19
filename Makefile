@@ -62,9 +62,9 @@ BANK2_RUNTIME_RESERVE ?= 1536
 # ranges so patch-assets.py can produce one LOAD",8,1" image.
 MOSPEED_JAR ?= $(TOOLS_DIR)/mospeed/basicv2.jar
 MOSPEED_URL ?= https://github.com/EgonOlsen71/basicv2/raw/master/dist/basicv2.jar
-# Locked regions matching canonical layout: music/RNG $4200-$4BFF and rebased
-# sprites $AE7C-$C073.
-MOSPEED_MEMHOLE := $$4200-$$4BFF,$$AE7C-$$C073
+# Locked regions matching canonical layout: music/RNG $4200-$4BFF, title
+# character set $8800-$8FFF, and rebased sprites $AE7C-$C073.
+MOSPEED_MEMHOLE := $$4200-$$4BFF,$$8800-$$8FFF,$$AE7C-$$C073
 MOSPEED_PRG := $(BUILD_DIR)/lunalight-mospeed.prg
 MOSPEED_ASSETS := $(BUILD_DIR)/lunalight-mospeed-assets.prg
 MOSPEED_FULL := $(BUILD_DIR)/lunalight-mospeed-full.prg
@@ -72,11 +72,12 @@ MOSPEED_FULL := $(BUILD_DIR)/lunalight-mospeed-full.prg
 # Sprite shapes for pointers 187-194/203-212/253/254
 SPRITES := sprites/lsprite.prg
 SPRITES_BANK2 := $(BUILD_DIR)/lsprite-bank2.prg
-# Same shapes plus the refuel-pad flag in spare slot 243 and the orbiting
-# command module in spare slot 244 (MOSpeed/interpreted alt)
+# Same shapes plus the flag, command module, pennant field, LEM interior masks
+# and landing dust patched into spare slots 243-251 (MOSpeed/interpreted alt).
 SPRITES_OUT := $(BUILD_DIR)/lsprite-shapes.prg
 # Bank-2 payload: added shapes patched into their spare slots, then rebased
-# $2E7C->$AE7C so slot 243 lands at VIC-bank-2 $BCC0 and slot 244 at $BD00.
+# $2E7C->$AE7C so the added slots resolve in VIC bank 2 (flag 243 at $BCC0,
+# command module 244 at $BD00, pennant field 245 at $BD40).
 SPRITES_BANK2_SHAPES := $(BUILD_DIR)/lsprite-shapes-bank2.prg
 MUSIC_SRC := $(SRC_DIR)/music.s
 MUSIC_CFG := $(TOOLS_DIR)/music.cfg
@@ -88,6 +89,10 @@ RNG_SRC   := $(SRC_DIR)/rng.s
 RNG_CFG   := $(TOOLS_DIR)/rng.cfg
 RNG_OBJ   := $(BUILD_DIR)/rng.o
 RNG_PRG   := $(BUILD_DIR)/rng.prg
+# Title-only RAM character set at $8800.  It copies the normal ROM glyphs and
+# replaces only the logo/star codes, then the title selects it with $D018=$12.
+TITLE_CHARSET_TOOL := $(TOOLS_DIR)/make-title-charset.py
+TITLE_CHARSET := $(BUILD_DIR)/title-charset.prg
 
 # Tokenized BASIC for the canonical source and archived bank-0 control.
 BASIC_PRG := $(BUILD_DIR)/lunalight.prg $(BUILD_DIR)/lunalight-bank0.prg
@@ -125,7 +130,7 @@ GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
 .NOTPARALLEL:
 
 # Default: canonical original-Blitz compile of the promoted bank-2 source plus
-# the music, RNG and rebased flag-sprite embed.
+# the music, RNG, title character set and rebased sprite embed.
 all: blitz
 
 prg: $(BASIC_PRG)
@@ -174,6 +179,9 @@ $(RNG_OBJ): $(RNG_SRC) | $(BUILD_DIR)
 $(RNG_PRG): $(RNG_OBJ) $(RNG_CFG)
 	$(LD65) -C $(RNG_CFG) -o $@ $(RNG_OBJ)
 
+$(TITLE_CHARSET): $(TITLE_CHARSET_TOOL) | $(BUILD_DIR)
+	$(PYTHON) $(TITLE_CHARSET_TOOL) $@
+
 $(SPRITES_OUT): $(SPRITES) $(TOOLS_DIR)/make-shapes.py | $(BUILD_DIR)
 	$(PYTHON) $(TOOLS_DIR)/make-shapes.py $(SPRITES) $@
 
@@ -193,7 +201,8 @@ $(BUILD_DIR)/%-full.prg: $(BUILD_DIR)/%.prg $(SPRITES_OUT) $(MUSIC_PRG) $(RNG_PR
 	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $< $(SPRITES_OUT) $(MUSIC_PRG) $(RNG_PRG) $@
 
 # Canonical: compile the promoted source with the original Blitz! disk, then
-# append music, RNG and the rebased flag sprites in ascending address order.
+# append music, RNG, the title character set and rebased sprites in ascending
+# address order.
 blitz: $(BLITZ_FULL)
 
 # Bank-2 names kept as aliases; the canonical package *is* the bank-2 package.
@@ -213,9 +222,10 @@ $(BLITZ_PRG): $(BUILD_DIR)/lunalight.prg $(BLITZ_DISK) $(BLITZ_DRIVER) $(TOOLS_D
 		--vice $(X64SC) \
 		--c1541 $(C1541)
 
-# Ascending embed order: code, music $4200, RNG $4400-$4BFF, flag sprites $AE7C.
-$(BLITZ_FULL): $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
-	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $@
+# Ascending embed order: code, music $4200, RNG $4400-$4BFF, title charset
+# $8800, then rebased sprites $AE7C.
+$(BLITZ_FULL): $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BLITZ_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $@
 
 # Bank-0 fallback: pre-promotion source, original sprites at $2E7C, music $4200.
 blitz-bank0: $(BLITZ_BANK0_FULL)
@@ -290,6 +300,7 @@ verify-bank2: $(BLITZ_FULL) $(BLITZ_BANK0_FULL) $(BANK2_VERIFY_DRIVER) $(TOOLS_D
 		--patched-sprite-prg $(SPRITES_OUT) \
 		--music-prg $(MUSIC_PRG) \
 		--rng-prg $(RNG_PRG) \
+		--title-charset $(TITLE_CHARSET) \
 		--canonical-source $(SRC_BANK0) \
 		--bank2-source $(SRC_CANONICAL) \
 		--screen-base $(BANK2_SCREEN_BASE) \
@@ -314,8 +325,8 @@ $(BANK2_CAPACITY_PRG) $(BANK2_CAPACITY_REPORT): $(BLITZ_PRG) $(SPRITES_BANK2_SHA
 		--report $(BANK2_CAPACITY_REPORT) \
 		--reserve-bytes $(BANK2_RUNTIME_RESERVE)
 
-$(BANK2_CAPACITY_FULL): $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
-	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(SPRITES_BANK2_SHAPES) $@
+$(BANK2_CAPACITY_FULL): $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $(BANK2_CAPACITY_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $@
 
 verify-bank2-capacity: $(BANK2_CAPACITY_FULL) $(BANK2_CAPACITY_REPORT) $(BLITZ_BANK0_FULL) $(BANK2_VERIFY_DRIVER) $(BLITZ_GAMEPLAY_BASELINE) $(BLITZ_GAMEPLAY_DRIVER) $(TOOLS_DIR)/vice_monitor.py
 	$(PYTHON) $(BLITZ_GAMEPLAY_DRIVER) \
@@ -337,6 +348,7 @@ verify-bank2-capacity: $(BANK2_CAPACITY_FULL) $(BANK2_CAPACITY_REPORT) $(BLITZ_B
 		--patched-sprite-prg $(SPRITES_OUT) \
 		--music-prg $(MUSIC_PRG) \
 		--rng-prg $(RNG_PRG) \
+		--title-charset $(TITLE_CHARSET) \
 		--canonical-source $(SRC_BANK0) \
 		--bank2-source $(SRC_CANONICAL) \
 		--screen-base $(BANK2_SCREEN_BASE) \
@@ -370,8 +382,8 @@ $(MOSPEED_ASSETS): $(MOSPEED_PRG) $(MUSIC_PRG) $(RNG_PRG) $(TOOLS_DIR)/patch-ass
 
 # MOSpeed's image ends below the VIC-bank-2 sprite region, so append the
 # rebased segment after filling the lower memory holes.
-$(MOSPEED_FULL): $(MOSPEED_ASSETS) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
-	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $< $(SPRITES_BANK2_SHAPES) $@
+$(MOSPEED_FULL): $(MOSPEED_ASSETS) $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $(TOOLS_DIR)/embed-sprites.py
+	$(PYTHON) $(TOOLS_DIR)/embed-sprites.py $< $(TITLE_CHARSET) $(SPRITES_BANK2_SHAPES) $@
 
 # Canonical disk: self-contained promoted original-Blitz full PRG (LOAD"*",8,1 / RUN).
 $(D64): $(BLITZ_FULL)

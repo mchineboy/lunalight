@@ -1,344 +1,321 @@
 # `src/lunalight.bas` section map
 
-Companion to the canonical BASIC source. This is a reading guide, not a
-substitute for `[docs/feature-layering.md](feature-layering.md)` or the
-`[README.md](../README.md)` memory map and build notes. Line numbers refer to
-`[src/lunalight.bas](../src/lunalight.bas)`.
+This is a guided map of the canonical game source,
+[`src/lunalight.bas`](../src/lunalight.bas). It explains the code in source-line
+order and assumes the reader is new to Commodore 64 BASIC. For the memory map,
+build commands, and project history, use [the README](../README.md) and
+[feature layering](feature-layering.md).
 
-Physics constants (`m2±.6`, `po` via `.1+m2/20`, `hm/4`, soft-landing gates)
-are frozen; this doc describes *where* they live, not how to change them.
+The physics equations and landing limits are deliberately frozen. This guide
+explains them; it is not permission to retune them.
+
+## A quick BASIC/C64 reading primer
+
+The source is compact because it is compiled with the original Blitz! compiler.
+Several conventions make it easier to read:
+
+- A colon (`:`) separates statements on one numbered BASIC line. Execution
+  continues left-to-right.
+- A period (`.`) is BASIC's shortest spelling of numeric zero. For example,
+  `e2=.` clears a flag.
+- `PEEK(address)` reads one byte of C64 memory; `POKE address,value` writes one.
+  The program uses them to control VIC-II graphics, SID sound, and the keyboard.
+- `GOSUB line` calls a numbered helper and `RETURN` comes back to the statement
+  after the call. `GOTO line` transfers without returning.
+- Sprite pointer values are not memory addresses. In VIC bank 2, a pointer such
+  as `187` means the shape at bank base `$8000 + 187 * 64`.
+
+The game uses VIC bank 2: screen matrix `$8400`, sprite-pointer table `$87F8`,
+title character set `$8800`, character ROM `$9000`, and sprite payload starting
+at `$AE7C`.
 
 ## Program flow
 
 ```text
-20  VIC bank 2 + arrays
-30  RNG collect → music on → title → music off → SID clear
-40…  constants, first terrain
-90…  round spawn → flight loop (160…)
-       ├─ soft land → score (720…) → 840 → next round
-       └─ crash → explosion (1320) → 710 → score path
-1020  title / attract idle
-1100  procedural terrain + pads
-1920 / 1950  attract pad pick + autopilot (branched from 160)
+20   cold-start display and title-string memory guard
+30   collect entropy → start title music → title → stop music
+40   restore flight display/memory → create terrain and first round
+90   spawn a round
+160  one flight frame
+ ├─ 630  collision / landing decision
+ │   ├─ 706  successful landing dust → scoring
+ │   └─ 1320 crash explosion → scoring
+ └─ 840  prepare next round
+
+1020 title tableau and idle timer
+1100 procedural terrain and pads
+1920 attract target selection; 1950 attract autopilot
 ```
 
-Attract mode (`am=1`) reuses the same flight and scoring path. It never writes
-the high score. Any key or stick input during the demo restarts at line 20.
-When the demo itself reaches game over it announces the message, then takes the
-same cold restart so the title idles for another song-length wait.
+Attract mode (`am=1`) uses the normal flight, collision, scoring, and game-over
+code. It differs only in how it supplies controls and in never writing the high
+score. Any key or joystick input during the demo returns to the cold-start title.
 
----
+## Boot, memory, and VIC setup (10–30)
 
-## Boot and VIC setup (10–30)
+| Lines | What happens | Why it matters |
+| --- | --- | --- |
+| 10 | A historical `REM SAVE` command. | It is a comment; `REM` consumes the rest of the line. |
+| 20 | `CLR` clears variables; `POKE 55,0:POKE 56,136` temporarily sets `MEMSIZ` to `$8800`; bank 2, screen `$8400`, and `$D018=$14` are selected. `rv$` and `bl$` are created. | BASIC strings normally grow downward from `$A000`. The title later uses `$8800-$8FFF` for character shapes, so its strings must begin below that page. `rv$` is a debug label; `bl$` is 40 spaces for erasing a message row. |
+| 25 | Dimension the six pad arrays and the 40-cell terrain-height array. | `DIM` reserves indexed storage before play begins. |
+| 30 | Call RNG `collect`, install title music, call the title routine, then uninstall and clear the SID. | The order is load-bearing: the entropy collector uses SID voice 3, which the music IRQ would otherwise overwrite. |
 
+`$D018=$14` selects screen `$8400` and the character ROM image at `$9000`.
+Writing `$18` instead would point the VIC at blank RAM at `$A000`; the display
+would disappear and the sprite/background collision latch used for landing would
+not work.
 
-| Lines | Role                                                                                                                                                                                                             |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 10    | Historical disk-save REM; not executed meaningfully                                                                                                                                                              |
-| 20    | `CLR`; disable SHIFT+Commodore charset flip (`CHR$(8)`); select VIC bank 2 (`$DD00` low bits `01`); screen base `$8400` (`POKE 648,132`); `$D018=$14` so character ROM is visible at `$9000`; init `rv$` / `bl$` |
-| 25    | Dimension pad arrays (`px`/`pw`/`py`/`pb`/`rf`/`ph`) and the 40-column height map `h()`                                                                                                                          |
-| 30    | **Load-bearing order:** `SYS 17408` (RNG collect) **before** `SYS 16896` (music install); title subroutine 1020; `SYS 16899` stops music for flight; 990 clears the SID                                          |
+## Flight setup and first terrain (40–135)
 
+| Lines | What happens |
+| --- | --- |
+| 40 | Restore `MEMSIZ=$A000`, disable title sprites, restore `$D018=$14`, clear the screen, and cache VIC (`v`), SID (`s`), screen (`sn`), colour RAM (`bc`), and RNG-table (`rb`) addresses. |
+| 50 | Define the HUD label strings, initial spawn position/momentum (`ep`/`hp`), and colour-RAM base `lc`. |
+| 60 | Set sprite-pointer base `pn=$87F8`, fuel, lives, next spawn speed, and command-module X; build terrain with `GOSUB 1100`. Attract mode also picks its first target. |
+| 70–80 | Give sprites 2 and 3 the Earth shapes (253 and 254), colours, and shared position `(60,60)`. Sprite 3 is the blue disc; sprite 2 supplies white detail. |
+| 90 | Start a round: `po` is lander Y, `pp` is lander X, and `hm` is horizontal momentum. |
+| 91–100 | Move the cosmetic command module 8 pixels per round and advance the next ordinary spawn seed. |
+| 110–112 | Clear the lander high-X flag and select the correct `$D010` mask. An attract spawn can begin beyond X=255. |
+| 120–135 | Clamp the next vertical spawn speed; select upright LEM shape 187 and its black fill 246; set outline, fill, and exhaust pointers; set sprite colours; draw the score bar. |
 
-`$D018=$18` would select blank RAM at `$A000`: invisible screen and no
-sprite/background collision latch, so landing never fires.
+The LEM uses three co-registered sprites in flight: outline 0, black interior
+fill 1, and exhaust 6. Co-registering means all three receive the same X/Y
+coordinates; the exhaust artwork itself provides the visible offset below the
+engine.
 
----
+## Flight input (160–200)
 
-## Game constants and first round (40–135)
+This is the top of the per-frame loop. It is reached again from line 635 after a
+frame that has not landed or crashed.
 
+| Lines | What happens |
+| --- | --- |
+| 160 | Read one keyboard character with `GET z$`, read joystick port 2 into `jv`, or branch to the attract autopilot. |
+| 165 | Translate cursor-key fallback input through helper 1980. |
+| 168–187 | Rotate the lander. Joystick right increments `p`; left decrements it. The small branches prevent rotation beyond the five supported attitudes. Lines 185–187 choose the matching fill and exhaust pointers. |
+| 190 | `F1` writes a pause marker into the top-left screen cell and enters the pause loop. |
+| 200 | With no fuel, skip directly to coast. |
 
-| Lines   | Role                                                                                                                                                                                         |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 40      | Clear screen; bind VIC (`v=53248`) and SID (`s=54272`); screen/colour base addresses for bank 2 (`sn`/`bc`); RNG read base `rb=18432`; border/background colours; `rz` starts as pad index 1 |
-| 50      | HUD label strings; first-spawn seeds `ep`/`hp`; colour RAM base `lc`                                                                                                                         |
-| 60      | Sprite-pointer base `pn=$87F8`; fuel `fe`/`fu`; lives `nm`; vertical spawn ratchet `n2`; command-module X `mx`; build terrain (`GOSUB 1100`); if attract, pick a demo pad (`1920`)           |
-| 70–80   | Earth decoration sprites 2/3 (pointers 253/254, colours, fixed at 60,60)                                                                                                                     |
-| 90      | Round spawn: vertical position `po`, horizontal `pp` from `ep`, horizontal momentum `hm` from `hp`                                                                                           |
-| 91–92   | Step the command module 8 px right each round; wrap at 240 → 104; poke sprite 7 X                                                                                                            |
-| 95–100  | Ratchet next-round spawn (`ep` leftward, `hp` more rightward drift); wrap when exhausted                                                                                                     |
-| 110–112 | Clear X-MSB to flag mask `fm`; attract may already be past x=255 and needs `fh`                                                                                                              |
-| 120–135 | Cap spawn vertical speed; set upright shape `p=187` and fill `f=246`; initialize outline/fill/exhaust pointers; set velocity, collision bit and colours; refresh score bar (`1500`) |
+`p` is both a visual pointer and an attitude state. The later `ON p-186 GOTO`
+uses it to choose the matching thrust equation.
 
+## Thrust, gravity, and fuel (220–290)
 
----
+| Lines | What happens |
+| --- | --- |
+| 220 | Fire button or Shift: enable all eight sprites (`$D015=255`), remember that thrust is active in `q`, and configure the engine. |
+| 230–235 | Coast: add gravity (`m2=m2+.6`), silence the engine voice, and disable only sprite 6 exhaust (`$D015=191`). |
+| 240 | Program SID voice 1 as the engine sound. |
+| 245–290 | Dispatch on attitude. Upright thrust subtracts `.6` from vertical momentum and costs one fuel; angled attitudes also alter `hm` and cost two or three fuel. |
 
-## Flight loop: input (160–200)
+These float equations are the original landing feel. Do not change the `.6`,
+`.2`, position integration, or fuel figures without explicitly retuning the
+motion oracle.
 
-Entered every frame until collision or out-of-bounds.
+## Motion, wrapping, and sprite placement (330–480)
 
+| Lines | What happens |
+| --- | --- |
+| 330–340 | Integrate vertical motion. Descending uses `po=po+(.1+m2/20)`; ascending is the symmetrical negative case. |
+| 350–420 | Integrate horizontal motion by `hm/4`. Crossing a screen half adjusts `pp`, toggles `e2`, and writes the matching `$D010` high-X mask. |
+| 430–435 | Put outline and fill at `pp,po` every frame. When `q` says thrust is active, put the exhaust at the same coordinate too. |
+| 460 | Prevent ascent above Y=25. |
+| 480 | A fall below Y=230 is an immediate hard crash. |
 
-| Lines   | Role                                                                                                                                |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 160     | Read keyboard (`GET`) and joystick port 2 (`PEEK(56320)`); attract jumps to autopilot `1950`                                        |
-| 165     | Non-empty key → keyboard→joystick map (`1980`)                                                                                      |
-| 168–187 | Rotate: right (`AND 15 = 7`) increments `p`, left (`= 11`) decrements; ±90° limiter wraps through the pointer band; map `p` to fill `f` and refresh moving pointers |
-| 190     | `F1` → pause (`1270`), with a visible pause tile                                                                                    |
-| 200     | If out of fuel, skip thrust                                                                                                         |
+`$D010` holds one X high bit per sprite. `fm=48` supplies the high bits for the
+two flag sprites. `fh=67+fm` additionally enables the high bit for outline,
+fill, and exhaust, while intentionally leaving sprite 7's bit clear: the module
+must remain below X=256.
 
+## HUD update (500–621)
 
-Keyboard fallback (cursor keys) is applied in 1980 before the rotate/thrust tests
-see `jv`.
+The HUD is deliberately printed only in the upper rows; printed characters are
+solid collision targets for the LEM.
 
----
+| Lines | What happens |
+| --- | --- |
+| 500–531 | Choose green/yellow/red from vertical speed and print `VEL` plus `INT(m2)`. |
+| 535–571 | Clamp fuel at zero, choose its warning colour, and print `FUEL`. |
+| 580–621 | Clamp horizontal speed to displayable values, choose a colour, and print `HORZ`. |
 
-## Flight loop: thrust, gravity, fuel (220–290)
+`c$` is a left cursor movement followed by a space. It erases an old final digit
+when a displayed number gets shorter.
 
+## Collision, landing, and refuelling (630–706)
 
-| Lines   | Role                                                                                                                            |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 220     | Fire button (`jv AND 16 = 0`) or SHIFT (`PEEK(653)`): enable all sprites (`255`), keep `q=8`, go thrust                        |
-| 230–235 | Coast: gravity `m2=m2+.6`, silence voice, mask `191` (all except sprite-6 exhaust); first coast frame clears `q`               |
-| 240     | Engine voice setup (volume, ADSR, frequency, gate)                                                                              |
-| 245–290 | `ON p-186` dispatches attitude → thrust deltas and fuel burn: upright `m2-.6` / 1 fuel; angled mixes of `m2`/`hm` with 2–3 fuel |
+| Lines | What happens |
+| --- | --- |
+| 630–635 | Read `$D01F`, the sprite/background collision latch. Only collisions below Y=120 count as terrain contact; otherwise continue flying. |
+| 640–644 | Enforce the soft-landing gates: `ABS(hm)<=2`, upright pointer 187, and `INT(m2)<=5`. Failure jumps to the crash routine. |
+| 649 | Calculate verdict centre `pf=INT(pp)+12`; add 256 when `e2` says the lander is in the high-X half. |
+| 650–690 | Search all five pads. A match needs centre X inside its width and lander Y within four pixels of its stored pad height. |
+| 700 | No matching pad means an off-pad crash; set `xz` so the post-mortem can describe it. |
+| 705–706 | On the refuel pad, fuel at or below 399 becomes 1000; then show the landing dust and continue to scoring. |
 
+`px(i)` is a pad's left edge, not its centre. The `+12` in line 649 converts the
+24-pixel lander sprite coordinate into its centre before comparison.
 
-These are the original float equations. Do not retune without an explicit plan
-for the motion oracle.
+## Resolution, scoring, and the next round (710–840)
 
----
+| Lines | What happens |
+| --- | --- |
+| 710 | Crash path: lose a LEM, make the next spawn gentler, and clear the landing index. |
+| 720 | Hide lander/exhaust, restore flag high-X bits, and call 1210 to re-arm the fill, flag field, and command module. |
+| 730 | Silence the engine and wait 26 jiffies before calculating results. |
+| 740 | A landing within three pixels of the pad centre earns a two-thirds pad-value bonus. |
+| 752–760 | Apply vertical-speed, horizontal-speed, and fuel penalties; add the bonus; add the turn total to session score. These lines are byte-identical to the bank-0 control source. |
+| 770–780 | Show exactly one crash post-mortem when needed, then bonus, points, and refuel messages. |
+| 785–795 | Handle game over. Normal play may update `hs`; attract mode cannot. An attract game-over goes back to line 20. |
+| 835 | In attract mode, choose the next demo target. |
+| 839–840 | Clear round bookkeeping, force a string collection with `gc=FRE(.)`, wait 10 jiffies, and spawn the next round. |
 
-## Flight loop: motion and wrap (330–480)
+The forced `FRE(.)` is essential. During flight, `MEMSIZ` is `$A000`; without a
+collection, BASIC's descending string heap eventually reaches the screen matrix
+and sprite pointers at `$8400-$87FF`.
 
+## Random, messages, and SID helpers (900–1010)
 
-| Lines   | Role                                                                                                                                                       |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 330–340 | Vertical integrate: `po` moves by `.1+                                                                                                                     |
-| 350–420 | Horizontal integrate: `pp` by `hm/4`; crossing 0 or 255 toggles `e2` and `$D010` between `fm` (flag MSBs) and `fh=67+fm` (outline/fill/exhaust + flags, module bit clear) |
-| 430–435 | Co-register outline sprite 0 and fill sprite 1 every loop; move exhaust sprite 6 only while thrust is active                                               |
-| 460     | Ceiling clamp at `po=25`                                                                                                                                   |
-| 480     | Floor: `po>230` forces a crash with `hm=10`                                                                                                                |
+| Lines | What happens |
+| --- | --- |
+| 900 | Read the next byte from the RNG table at `$4800` and increment `ri`. |
+| 960–980 | Wait for `F7` after game over; reset game counters, clear the old message, rebuild terrain, and continue. |
+| 982–986 | Centre a message on row 8, type one character at a time with SID clicks, wait 153 jiffies, then erase its full 40-column row. |
+| 990–1010 | Clear SID registers, make the short click, wait one jiffy, and release the gate. |
 
+All waits use the RNG module's `wait` entry: `POKE 679,n:SYS 17420`. This waits
+for KERNAL jiffies rather than burning CPU cycles in an empty `FOR` loop.
 
-`$D010` is rewritten wholesale on wrap. `fm=48` holds both flag sprites’ MSB;
-`fh=67+fm` adds the outline/fill/exhaust MSBs while leaving sprite 7 clear so
-the module stays below X 256.
+## Title tableau and attract idle (1020–1097)
 
----
+The title is a title-only graphics mode. It uses its own RAM character set and
+all eight sprites, then line 40 returns the machine to the normal flight mode.
 
-## Flight loop: HUD (500–621)
+| Lines | What happens |
+| --- | --- |
+| 1020 | Turn off inherited sprites, select title character RAM with `$D018=$12`, clear the screen, and set border/background colours. |
+| 1025–1028 | Assign all eight title sprite pointers, positions, colours, and normal-priority settings. The title scene uses LEM outline/fill/exhaust, Earth pair, flag pair, and module. |
+| 1030–1035 | Print the text title, then replace its letter cells with custom character codes 240–247 to make the chunky logo. |
+| 1040–1070 | Print license/contributor credits and the `F7` start prompt; write eight dim star characters; initialise title animation state (`ta`, `tm`, `ty`, `td`). |
+| 1072–1088 | Read music-loop length from `$4206/$4207`; start attract mode after one whole song without input. Any other key or joystick movement resets the timer. |
+| 1092–1097 | Every four jiffies, move the module, bob the LEM, co-register its fill and exhaust, alternate the exhaust enable bit, and twinkle selected stars. |
 
-Printed into the upper-right columns only (above the terrain collision zone).
-
-
-| Lines   | Role                                                            |
-| ------- | --------------------------------------------------------------- |
-| 500–531 | Vertical velocity colour (green / yellow / red) and `VEL` value |
-| 535–571 | Fuel clamp to 0; colour bands; `FUEL` value                     |
-| 580–621 | Clamp `                                                         |
-
-
-`c$` is a backspace+space eraser so shorter numbers do not leave digits behind.
-
----
-
-## Soft landing and pad match (630–706)
-
-
-| Lines   | Role                                                                                                  |
-| ------- | ----------------------------------------------------------------------------------------------------- |
-| 630–635 | Sprite–background collision on the lander (`$D01F AND 1`) only counts when `po>120`; else loop to 160 |
-| 640–644 | Soft-landing gates: `                                                                                 |
-| 649     | Verdict X = lander centre `INT(pp)+12` (+256 if `e2`). `px(i)` is the pad’s **left** edge             |
-| 650–690 | Scan pads 1–5 for X overlap and `                                                                     |
-| 700     | No pad → `xz=1` (off-pad cause) and crash                                                             |
-| 705–706 | Refuel pad (`rf(lz)`) with `fe≤399` fills to 1000 and sets message flag `e7`                          |
-
-
-Successful landings fall through to 720.
-
----
-
-## Scoring and round reset (710–840)
-
-
-| Lines       | Role                                                                                                                                        |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 710         | Crash entry: lose a life, ease next spawn `n2`, clear `lz`                                                                                  |
-| 720         | Disable lander/exhaust; restore `$D010` to `fm`; re-arm flag + module (`1210`)                                                              |
-| 730         | Silence engine; fixed jiffy pause via `POKE 679,n` + `SYS 17420`                                                                            |
-| 740         | Centre-hit bonus: within 3 px of pad centre → `bs = INT(pb*2/3)`                                                                            |
-| **752–760** | **Shared scoring lines — byte-identical to bank-0.** Velocity/horizontal/fuel penalties, bonus, accumulate `pt`                             |
-| 770         | If this was a crash (`cr`), print post-mortem (`1900`)                                                                                      |
-| 775–780     | Bonus / points / “fuel tanks full” messages via 982                                                                                         |
-| 785–795     | Game-over when out of lives or fuel; high score only if not attract; attract prints “game over” then cold-restarts at line 20               |
-| 835         | Attract: pick next demo pad (live rounds only; attract game-over no longer reaches here)                                                    |
-| 839–840     | Zero turn score; `fu=fe`; `**gc=FRE(.)` forced string collect** (screen at `$8400` sits in the heap descent); short pause; next round at 90 |
-
-
-Without line 840’s `FRE(.)`, attract play eventually corrupts the screen matrix
-and sprite pointers.
-
----
-
-## Helpers: RNG, messages, SID click (900–1010)
-
-
-| Lines    | Role                                                                             |
-| -------- | -------------------------------------------------------------------------------- |
-| 900      | Next PRNG byte: `PEEK(rb+ri)`, advance `ri`                                      |
-| 960–980  | Game-over wait loop; `F7` resets score/lives/fuel and rebuilds terrain           |
-| 982–986  | Centre a message on row 8, type it with SID clicks, long pause, erase with `bl$` |
-| 990–1010 | Short SID “key click”; used by title path and message typing                     |
-
-
-All in-game pauses use the RNG module’s `wait` entry (`SYS 17420`), not empty
-`FOR` loops (those measure CPU work and MOSpeed deletes them).
-
----
-
-## Title and attract idle (1020–1090)
-
-
-| Lines     | Role                                                                                                                       |
-| --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1020–1070 | Clear `$D015` first (literal `POKE 53269,0` — `v` is not bound yet on the first title call), then clear screen and draw title / “press F7”; music is still running from line 30 |
-| 1072      | Read published song length in jiffies from `$4206/$4207` (`PEEK(16902)+…`)                                                 |
-| 1074–1090 | Idle until `F7` (return `am=0`) or elapsed ≥ one song pass (`am=1`); any other key or stick activity resets the idle timer |
-
-
-Attract timeout therefore tracks music tempo/length automatically.
-
----
+[`tools/make-title-charset.py`](../tools/make-title-charset.py) copies the normal
+character ROM into `$8800-$8FFF` and replaces only the logo and star glyphs.
+Line 20 limits title-time `MEMSIZ` to `$8800`, so BASIC strings cannot overwrite
+that character page. Before flight, line 40 restores both `MEMSIZ=$A000` and
+`$D018=$14`; the latter is required for the visible character ROM and landing
+collision latch.
 
 ## Procedural terrain and pads (1100–1200)
 
+| Lines | What happens |
+| --- | --- |
+| 1100 | Clear the display, hide title sprites, refill the RNG table, reset the random index, and choose terrain greys. |
+| 1102–1136 | Generate 40 terrain heights. It chooses short random target runs, moves toward them, then applies a small noise pass while clamping every height to 1–12. |
+| 1136–1165 | Define five pad bands, choose a shifted ordering of height classes, choose each four-character-wide pad, and store both display and sprite-space geometry. Exactly one low pad becomes the refuel pad. |
+| 1175–1190 | Paint each terrain cell into screen RAM and colour RAM. Slope glyphs 108/123 are used at height transitions; solid terrain uses reverse space 160. |
+| 1192–1196 | Paint each pad surface green with yellow end caps. |
+| 1197–1200 | Compute the flag position and high-X masks, install the flag/module sprites, and restore the normal cursor tile. |
 
-| Lines     | Role                                                                                                                                                                                                                                                  |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1100      | Clear; sprites off; `SYS 17411` refill RNG table; terrain/colour defaults                                                                                                                                                                             |
-| 1102–1136 | Random-walk height map `h(0..39)` in 1–12, with short segment runs and a light noise pass                                                                                                                                                             |
-| 1136–1165 | Five pad slots on column anchors 1/9/17/25/33; each pad is **four glyphs (32 px)** wide; altitude band sets `pb` (500/600/800); exactly one low pad gets `rf=1` and becomes `rz`; slope feathering around pad edges; `py`/`px` stored in sprite space |
-| 1175–1190 | Paint terrain cells (`sc` slope glyphs 108/123 or solid 160) into screen `$8400` + colour RAM; greys 11/12                                                                                                                                            |
-| 1192–1196 | Overpaint pad tops as green bar with yellow ends                                                                                                                                                                                                      |
-| 1197–1198 | Flag X/Y from refuel pad; build `fm` / `fh` MSB masks; place sprites (`1210`)                                                                                                                                                                         |
-| 1200      | Ready cursor/colour poke; return                                                                                                                                                                                                                      |
+The pad width is always four glyphs, or 32 pixels. Because the LEM is 24 pixels
+wide, that leaves four pixels of visible clearance on each side.
 
+## Flight sprites: flag, fill, and module (1210–1215)
 
----
+| Lines | What happens |
+| --- | --- |
+| 1210 | Sprite 4: white flag outline/mast, pointer 243, at `fx,fy`. |
+| 1211 | Sprite 5: blue solid pennant field, pointer 245, at the same coordinate and behind sprite 4. |
+| 1212 | Sprite 7: light-grey command module, pointer 244 at Y=55; re-enable fill, field, and module bits after line 720. |
+| 1213–1215 | Document the mask repair; keep the lander high-X bit set if required; return. |
 
-## Fill, flag and command module sprites (1210–1215)
+The two-sprite flag is intentional: a single high-resolution sprite cannot
+contain both white outline/emblem and blue field. Colours 11 and 12 are avoided
+because they are terrain greys.
 
+## Pause, explosion, and status (1270–1520)
 
-| Lines | Role                                                                                                                      |
-| ----- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1210  | Sprite 4: flag outline/mast, pointer 243, white (`v+43`), at `fx`/`fy`                                                    |
-| 1211  | Sprite 5: pennant field, pointer 245, blue (`v+44`), same XY (behind)                                                     |
-| 1212  | Sprite 7: command module, pointer 244, grey, Y 55; `PEEK(v+21) OR 162` re-enables LEM fill + field + module after line 720 clears them |
-| 1214  | If lander is in the high X half (`e2`), keep lander MSB set                                                               |
+| Lines | What happens |
+| --- | --- |
+| 1270–1310 | Pause loop. `F1` resumes; `F7` cold-restarts at line 20; `HOME` prints `rv$` and stops for debugging. |
+| 1320–1420 | Crash presentation. It silences the engine, assigns four explosion pointers before enabling them, packs high-X bits, animates pointers 203–212 with six-jiffy frames, then leaves the Earth pair visible. |
+| 1500–1520 | Draw the bottom status line: high score, score, and LEM count. Attract mode adds `ATTRACT` at home. |
 
+## Landing dust (1700–1705)
 
-Never use colours 11 or 12 for the flag: they match the terrain greys.
-
-Flight enable masks: **191** coast / **255** thrust. Line 720 is a protected
-scoring neighbour, so fill/field/module bits are restored here instead.
-
----
-
-## Pause (1270–1310)
-
-
-| Lines     | Role                                         |
-| --------- | -------------------------------------------- |
-| 1270–1280 | `F1` again resumes to the thrust test        |
-| 1290      | `F7` cold-restarts at line 20                |
-| 1300      | `HOME` prints `rv$` and `STOP` (debug break) |
-
-
----
-
-## Crash explosion (1320–1420)
-
-
-| Lines     | Role                                                                                                                                   |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 1320–1328 | Kill engine voice; yellow explosion colours; snapshot crash X; set `cr=1`; assign explosion pointers **before** enabling those sprites |
-| 1330–1370 | Place explosion sprite cluster left/right of the lander; pack `$D010`; enable mask `252`                                               |
-| 1380      | Multicolour explosion setup                                                                                                            |
-| 1390–1400 | Animate pointers 203→212 with fading volume and jiffy delays                                                                           |
-| 1410      | Silence; hide lander; leave Earth sprites on                                                                                           |
-| 1420      | Join the scoring path at 710                                                                                                           |
-
-
----
-
-## Score bar (1500–1520)
-
-Bottom status line: high score, current score, LEM count. Attract prefixes
-`ATTRACT` on the home line. Called at round start and when the high score
-updates.
-
----
+After a successful landing, sprite 6 temporarily changes from exhaust pointer
+`p+8` to dust pointer 251. It is placed at the LEM's same `pp,po` coordinate,
+coloured light grey, enabled for ten jiffies, then normal resolution continues.
+The dust shape itself supplies its ground-level offset.
 
 ## Crash post-mortem (1900–1918)
 
-Exactly **one** line per crash, then clear `xz`.
+The game deliberately prints one sentence per crash, never a stack of messages.
 
+| Lines | What happens |
+| --- | --- |
+| 1902 | Take one RNG byte and choose the cause branch or consequence branch. |
+| 1903–1913 | Build a cause message: off-pad boulder, excessive horizontal speed, sideways landing, or vertical-speed crater. Clear `xz` before returning. |
+| 1914–1918 | Choose one of 13 consequence `DATA` strings using a rotating, jiffy-salted index; clear `xz`; print it. |
 
-| Lines     | Role                                                                            |
-| --------- | ------------------------------------------------------------------------------- |
-| 1902      | Coin flip on RNG byte: cause branch vs consequence branch                       |
-| 1903–1913 | Cause: off-pad (`xz`), cartwheel (`                                             |
-| 1914–1918 | Consequence: rotate through 13 `DATA` strings (2100+) with a jiffy-salted index |
+## Attract target selection and autopilot (1920–1984)
 
+| Lines | What happens |
+| --- | --- |
+| 1920–1926 | Pick a pad different from the previous one. Below 400 fuel, prefer the refuel pad. Normally aim `tx=px(al)+4`, which puts the LEM centre over the pad centre; every fourth target deliberately aims 16 pixels left of the pad. |
+| 1950–1951 | Any real key, stick movement, or Shift restarts at line 20. |
+| 1952–1967 | Measure horizontal/vertical error; remain high while crossing, then choose a late-burn vertical target and desired horizontal correction. |
+| 1968–1974 | Turn the desired correction into the same synthetic joystick bits (`jv`) used by human input, then fall through to normal rotation/thrust handling at line 170. |
+| 1980–1984 | Keyboard fallback: cursor right/down set the same rotate bits while preserving the stick's fire bit. |
 
----
-
-## Attract: pad pick and autopilot (1920–1984)
-
-
-| Lines     | Role                                                                                                                                                                                   |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1920–1926 | Choose a pad ≠ last; divert to refuel pad when fuel < 400; every fourth approach aim left of the pad (`tx = px-16`) to demo a crash                                                    |
-| 1950–1951 | Any real input → full restart at 20                                                                                                                                                    |
-| 1952–1974 | Float autopilot: compute error to target, cross high, dive when close, one late burn; synthesize `jv` (direction + optional thrust) and fall into the normal rotate/thrust code at 170 |
-
-
-Keyboard map (1980–1984): cursor right/down set rotate bits while preserving the
-fire bit from the stick.
-
----
+The autopilot does not have a special physics path. It simply manufactures the
+same controls a player would provide, so its demo remains a valid demonstration
+of the real game.
 
 ## `DATA` consequence lines (2100–2130)
 
-Thirteen yellow one-liners for the post-mortem consequence branch. Indexed by
-`RESTORE` + counted `READ` in 1916. Do not insert/delete lines without updating
-the `cn` wrap (`>12 → cn-13`).
+Thirteen yellow post-mortem sentences. Line 1916 uses `RESTORE` then repeated
+`READ` operations to select one. If lines are added or removed, the wrap in line
+1914 (`cn>12`) must change too.
 
----
+## Embedded machine-code helpers
 
-## Variable cheat sheet (hot path)
+Two modules are packed into the canonical full PRG. BASIC uses decimal `SYS`
+addresses to call their fixed entry points.
 
+| Module | Address | BASIC calls | Purpose |
+| --- | --- | --- | --- |
+| [`src/music.s`](../src/music.s) | `$4200-$43F0` | 16896 install; 16899 uninstall | Three-voice IRQ title music. `$4206/$4207` publishes the title song's length in jiffies. |
+| [`src/rng.s`](../src/rng.s) | `$4400-$4BFF` | 17408 collect; 17411 refill; 17420 wait | TOD/RNG collection, 1024-byte table at `$4800`, and jiffy-clock delays. |
 
-| Name                          | Meaning                                                         |
-| ----------------------------- | --------------------------------------------------------------- |
-| `po` / `pp`                   | Lander Y / X (0–255; `e2` marks X≥256)                          |
-| `m2` / `hm`                   | Vertical / horizontal momentum                                  |
-| `p` / `q`                     | Lander shape pointer / exhaust offset (8 when thrusting)        |
-| `f`                           | Attitude-matched black LEM fill pointer (246-250)               |
-| `fe` / `fu`                   | Current fuel / fuel at round start (scoring)                    |
-| `e2`                          | High-X half-screen flag for lander                              |
-| `fm` / `fh`                   | `$D010` masks: flags only / outline+fill+exhaust+flags          |
-| `px`/`pw`/`py`/`pb`/`rf`/`ph` | Pad left X, width (glyphs), Y, points, refuel flag, height band |
-| `lz` / `pf` / `xz`            | Landing pad index, verdict centre X, off-pad crash mark         |
-| `am`                          | Attract mode                                                    |
-| `tp` / `pt` / `bs` / `hs`     | Turn points, session score, centre bonus, high score            |
-| `nm` / `nf`                   | Lives left / game-over flag                                     |
-| `cr`                          | Crash this resolution (triggers post-mortem)                    |
-| `fx`/`fy`/`rz`                | Flag sprite XY and which pad owns it                            |
-| `mx`                          | Command-module X                                                |
-| `v` / `s` / `pn`              | VIC base, SID base, sprite-pointer base `$87F8`                 |
-| `rb` / `ri`                   | RNG table base `$4800` and read index                           |
+The `wait` call reads its delay count from address 679. For example,
+`POKE 679,26:SYS 17420` waits about 26/60 of a second on both PAL and NTSC
+because the KERNAL jiffy interrupt runs at 60 Hz.
 
+## Variable cheat sheet
 
----
+| Name | Meaning |
+| --- | --- |
+| `po` / `pp` | LEM Y / X; `e2` marks the X>=256 half. |
+| `m2` / `hm` | Vertical / horizontal momentum. |
+| `p` / `f` / `q` | LEM outline pointer / matching black fill / thrust-active flag. |
+| `fe` / `fu` | Current fuel / fuel at the start of this round. |
+| `px` / `pw` / `py` / `pb` | Pad left X, width in glyphs, Y, and point value. |
+| `rf` / `rz` / `fx` / `fy` | Refuel-pad marker/index and its flag sprite position. |
+| `pf` / `lz` / `xz` | Landing verdict centre, matched pad index, and off-pad crash marker. |
+| `fm` / `fh` | `$D010` X-high masks for flags only / lander plus flags. |
+| `tp` / `pt` / `bs` / `hs` | Turn points, session score, centre bonus, high score. |
+| `nm` / `nf` / `cr` | LEMs remaining, game-over flag, crash-resolution flag. |
+| `am` / `al` / `tx` / `ap` | Attract flag, target pad, target X, and descent phase. |
+| `ta` / `tm` / `ty` / `td` | Title animation time, module X, LEM Y, and LEM Y direction. |
+| `v` / `s` / `pn` | VIC base, SID base, sprite-pointer base. |
+| `rb` / `ri` | RNG-table base `$4800` and next-byte index. |
 
 ## Related docs
 
-
-| Doc                                               | Use when                          |
-| ------------------------------------------------- | --------------------------------- |
-| `[README.md](../README.md)`                       | Controls, build, memory map       |
-| `[docs/feature-layering.md](feature-layering.md)` | Why bank-2, sizes, layer evidence |
-
-
+| Document | Use it for |
+| --- | --- |
+| [README.md](../README.md) | Controls, build commands, packaging, and memory map. |
+| [feature-layering.md](feature-layering.md) | Capacity measurements, verification evidence, and design constraints. |
+| [src/music.s](../src/music.s) | Title music implementation and tempo constants. |
+| [src/rng.s](../src/rng.s) | Entropy collector, PRNG table, and jiffy wait implementation. |

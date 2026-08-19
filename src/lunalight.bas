@@ -1,8 +1,8 @@
   10 rem save"luna081426",8,1
-  20 clr:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
+  20 clr:poke55,0:poke56,136:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
   25 dimpx(5),pw(5),py(5),pb(5),rf(5),ph(5),h(39)
   30 sys17408:sys16896:gosub1020:sys16899:gosub990
-  40 print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
+  40 poke55,0:poke56,160:poke53269,0:poke53272,20:print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
   50 t1$="{rvon}vel {rvof} ":t2$="{rvon}fuel{rvof} ":t3$="{rvon}horz{rvof} ":ep=250:hp=-20:lc=55296
   60 pn=34808:fe=1000:fu=fe:nm=4:nf=.:n2=25:mx=160:gosub1100:ifamthengosub1920
   70 pokev+41,1:pokev+42,6:poke34810,253:poke34811,254
@@ -117,23 +117,35 @@
   990 forl=54272to54296:pokel,0:next
   1000 poke54296,10:poke54277,64:poke54273,17:poke54272,37:poke54276,17
   1010 poke679,1:sys17420:poke54276,16:return
-  1020 am=.:poke53269,.:print"{clr}":poke53280,11:poke53281,0
+  1020 am=.:poke53269,.:poke53272,18:print"{clr}":poke53280,11:poke53281,0
+  1025 poke34808,187:poke34809,246:poke34810,253:poke34811,254:poke34812,243:poke34813,245:poke34814,195:poke34815,244
+  1026 poke53248,124:poke53249,104:poke53250,124:poke53251,104:poke53252,44:poke53253,48:poke53254,44:poke53255,48
+  1027 poke53256,160:poke53257,124:poke53258,160:poke53259,124:poke53260,124:poke53261,104:poke53262,180:poke53263,52
+  1028 poke53264,0:poke53271,0:poke53276,0:poke53277,0:poke53287,1:poke53288,0:poke53289,1:poke53290,6:poke53291,1:poke53292,6:poke53293,7:poke53294,15:poke53269,255
   1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
+  1035 poke34043,240:poke34045,241:poke34047,242:poke34049,243:poke34051,240:poke34053,244:poke34055,245:poke34057,246:poke34059,247
   1040 poke214,15:print:print"{lblu}   mit license 1985-2026 s.hardison"
   1045 poke214,17:print:print"{lblu}        contributors:"
   1050 poke214,18:print:print"{lblu}          - t.hardison"
   1055 print"{down}";
   1060 printtab(11);
+  1065 poke33836,248:poke33907,248:poke33955,248:poke34026,248:poke34118,248:poke34184,248:poke34247,248:poke34346,248:ta=ti:tm=180:ty=104:td=1
   1070 print"press {rvon}f7{rvof} to start"
   1071 rem announce attract mode in seconds
   1072 sl=peek(16902)+peek(16903)*256:rem printtab(7)"{lblu}attract mode in"int(sl/60+.5)"seconds"
   1074 t0=ti
-  1080 getf$:iff$="{f7}"thenreturn
+  1080 gosub1092:getf$:iff$="{f7}"thenreturn
   1082 iff$<>""thent0=ti
   1084 if(peek(56320)and31)<>31thent0=ti
   1086 tt=ti-t0:iftt<.thentt=tt+5184000
   1088 iftt>=slthenam=1:return
   1090 goto1080
+  1092 ifti-ta<4thenreturn
+  1093 ta=ti:tm=tm+1:iftm>240thentm=144
+  1094 ty=ty+td:ifty<100orty>112thentd=-td
+  1095 poke53262,tm:poke53249,ty:poke53251,ty:poke53261,ty
+  1096 if(tiand8)thenpoke53269,255:poke33836,249:poke34026,249:poke34184,249:poke34247,248:return
+  1097 poke53269,191:poke33836,248:poke34026,248:poke34184,248:poke34247,249:return
   1100 print"{clr}":pokev+21,0:sys17411:ri=.:tc=12:td=11
   1102 hh=3:sg=.
   1110 forc=0to39:ifsg>0then1122
