@@ -32,7 +32,7 @@ at `$AE7C`.
 ## Program flow
 
 ```text
-20   cold-start display and title-string memory guard
+20   cold-start display and variable clear
 30   collect entropy → start title music → title → stop music
 40   restore flight display/memory → create terrain and first round
 90   spawn a round
@@ -56,7 +56,7 @@ score. Any key or joystick input during the demo returns to the cold-start title
 | Lines | What happens | Why it matters |
 | --- | --- | --- |
 | 10 | A historical `REM SAVE` command. | It is a comment; `REM` consumes the rest of the line. |
-| 20 | `CLR` clears variables; `POKE 55,0:POKE 56,136` temporarily sets `MEMSIZ` to `$8800`; bank 2, screen `$8400`, and `$D018=$14` are selected. `rv$` and `bl$` are created. | BASIC strings normally grow downward from `$A000`. The title later uses `$8800-$8FFF` for character shapes, so its strings must begin below that page. `rv$` is a debug label; `bl$` is 40 spaces for erasing a message row. |
+| 20 | `CLR` clears variables; bank 2, screen `$8400`, and `$D018=$14` are selected. `rv$` and `bl$` are created. | This is also the re-entry point for `GOTO 20` from attract mode, game over and the `F7` pause exit, so everything the title needs must be (re)established here. `MEMSIZ` is deliberately **not** touched: see line 40 and the `$8800` note in the title section. `rv$` is a debug label; `bl$` is 40 spaces for erasing a message row. |
 | 25 | Dimension the six pad arrays and the 40-cell terrain-height array. | `DIM` reserves indexed storage before play begins. |
 | 30 | Call RNG `collect`, install title music, call the title routine, then uninstall and clear the SID. | The order is load-bearing: the entropy collector uses SID voice 3, which the music IRQ would otherwise overwrite. |
 
@@ -69,7 +69,7 @@ not work.
 
 | Lines | What happens |
 | --- | --- |
-| 40 | Restore `MEMSIZ=$A000`, disable title sprites, restore `$D018=$14`, clear the screen, and cache VIC (`v`), SID (`s`), screen (`sn`), colour RAM (`bc`), and RNG-table (`rb`) addresses. |
+| 40 | Assert `MEMSIZ=$A000`, disable title sprites, restore `$D018=$14`, clear the screen, and cache VIC (`v`), SID (`s`), screen (`sn`), colour RAM (`bc`), and RNG-table (`rb`) addresses. |
 | 50 | Define the HUD label strings, initial spawn position/momentum (`ep`/`hp`), and colour-RAM base `lc`. |
 | 60 | Set sprite-pointer base `pn=$87F8`, fuel, lives, next spawn speed, and command-module X; build terrain with `GOSUB 1100`. Attract mode also picks its first target. |
 | 70–80 | Give sprites 2 and 3 the Earth shapes (253 and 254), colours, and shared position `(60,60)`. Sprite 3 is the blue disc; sprite 2 supplies white detail. |
@@ -90,7 +90,7 @@ frame that has not landed or crashed.
 
 | Lines | What happens |
 | --- | --- |
-| 160 | Read one keyboard character with `GET z$`, read joystick port 2 into `jv`, or branch to the attract autopilot. |
+| 160 | Read one keyboard character with `GET z$`, read joystick port 2 into `jv`, then branch to the attract autopilot if `am` is set. The `GET` and the joystick read must stay **unconditional**: the autopilot's own exit test in line 1952 reads that fresh `z$`/`jv`, and guarding them behind `IF am=.` would swallow the branch to 1950 as well, since everything after `THEN` is conditional. |
 | 165 | Translate cursor-key fallback input through helper 1980. |
 | 168–187 | Rotate the lander. Joystick right increments `p`; left decrements it. The small branches prevent rotation beyond the five supported attitudes. Lines 185–187 choose the matching fill and exhaust pointers. |
 | 190 | `F1` writes a pause marker into the top-left screen cell and enters the pause loop. |
@@ -167,11 +167,14 @@ when a displayed number gets shorter.
 | 770–780 | Show exactly one crash post-mortem when needed, then bonus, points, and refuel messages. |
 | 785–795 | Handle game over. Normal play may update `hs`; attract mode cannot. An attract game-over goes back to line 20. |
 | 835 | In attract mode, choose the next demo target. |
-| 839–840 | Clear round bookkeeping, force a string collection with `gc=FRE(.)`, wait 10 jiffies, and spawn the next round. |
+| 839–840 | Clear round bookkeeping, force a string collection with `gc=FRE(.)`, wait 10 jiffies, re-enter the flag placement at 1197 (which also rewrites the sprite pointers via 1210), drop the lander/fill/exhaust enable bits, and spawn the next round. |
 
-The forced `FRE(.)` is essential. During flight, `MEMSIZ` is `$A000`; without a
-collection, BASIC's descending string heap eventually reaches the screen matrix
-and sprite pointers at `$8400-$87FF`.
+The forced `FRE(.)` is essential. `MEMSIZ` is `$A000` throughout; without a
+collection, BASIC's descending string heap eventually reaches the title
+character page at `$8800-$8FFF` and then the screen matrix and sprite pointers
+at `$8400-$87FF`. Re-running 1197 immediately after the collection restores the
+eight sprite pointers, so a collection that ever did reach them cannot leave the
+next round with garbage shapes.
 
 ## Random, messages, and SID helpers (900–1010)
 
@@ -195,16 +198,19 @@ all eight sprites, then line 40 returns the machine to the normal flight mode.
 | 1020 | Turn off inherited sprites, select title character RAM with `$D018=$12`, clear the screen, and set border/background colours. |
 | 1025–1028 | Assign all eight title sprite pointers, positions, colours, and normal-priority settings. The title scene uses LEM outline/fill/exhaust, Earth pair, flag pair, and module. |
 | 1030–1035 | Print the text title, then replace its letter cells with custom character codes 240–247 to make the chunky logo. |
-| 1040–1070 | Print license/contributor credits and the `F7` start prompt; write eight dim star characters; initialise title animation state (`ta`, `tm`, `ty`, `td`). |
+| 1040–1070 | Print license/contributor credits and the `F7` start prompt; write eight dim star characters; initialise title animation state (`ta`, `tm`, `ty`, `bd`, `tw`). `bd` is the bob direction and must stay separate from terrain colour `td`; `tw` is the twinkle phase. |
 | 1072–1088 | Read music-loop length from `$4206/$4207`; start attract mode after one whole song without input. Any other key or joystick movement resets the timer. |
-| 1092–1097 | Every four jiffies, move the module, bob the LEM, co-register its fill and exhaust, alternate the exhaust enable bit, and twinkle selected stars. |
+| 1092–1097 | Every four jiffies, move the module, bob the LEM, co-register its fill and exhaust, alternate the exhaust enable bit, and twinkle selected stars. The twinkle phase is the bounded counter `tw=(tw+1)and3`, **not** `TI AND 8`: `TI` passes 32767 jiffies after roughly nine minutes of uptime and `AND` would then raise `ILLEGAL QUANTITY`. |
 
 [`tools/make-title-charset.py`](../tools/make-title-charset.py) copies the normal
 character ROM into `$8800-$8FFF` and replaces only the logo and star glyphs.
-Line 20 limits title-time `MEMSIZ` to `$8800`, so BASIC strings cannot overwrite
-that character page. Before flight, line 40 restores both `MEMSIZ=$A000` and
-`$D018=$14`; the latter is required for the visible character ROM and landing
-collision latch.
+That page lies in the string heap's descent path, but **do not** lower `MEMSIZ`
+to `$8800` to protect it: `MEMSIZ` is the top of string space, so the heap's
+first byte would be `$87FF` and the collection forced by line 840 would rewrite
+the sprite pointers at `$87F8-$87FF`. `MEMSIZ` stays at `$A000` and that same
+per-round collection is what keeps the heap clear of `$8FFF`. Line 40 asserts
+`MEMSIZ=$A000` and restores `$D018=$14`; the latter is required for the visible
+character ROM and landing collision latch.
 
 ## Procedural terrain and pads (1100–1200)
 
@@ -215,7 +221,7 @@ collision latch.
 | 1136–1165 | Define five pad bands, choose a shifted ordering of height classes, choose each four-character-wide pad, and store both display and sprite-space geometry. Exactly one low pad becomes the refuel pad. |
 | 1175–1190 | Paint each terrain cell into screen RAM and colour RAM. Slope glyphs 108/123 are used at height transitions; solid terrain uses reverse space 160. |
 | 1192–1196 | Paint each pad surface green with yellow end caps. |
-| 1197–1200 | Compute the flag position and high-X masks, install the flag/module sprites, and restore the normal cursor tile. |
+| 1197–1200 | Compute the flag position and high-X masks, install the flag/module sprites, and restore the normal cursor tile. Line 1197 computes `fx`/`fm` and line 1198 computes `fh`/`fy` before `GOSUB 1210`; both tails must stay **unconditional**. Folding them into the `IF fx>255` clause makes 1197 fall through into 1198's `GOSUB 1197` and recurse without bound, which presents as a hang plus spreading RAM corruption right after the terrain is drawn. Line 840 re-enters here at 1197. |
 
 The pad width is always four glyphs, or 32 pixels. Because the LEM is 24 pixels
 wide, that leaves four pixels of visible clearance on each side.
@@ -263,9 +269,9 @@ The game deliberately prints one sentence per crash, never a stack of messages.
 | Lines | What happens |
 | --- | --- |
 | 1920–1926 | Pick a pad different from the previous one. Below 400 fuel, prefer the refuel pad. Normally aim `tx=px(al)+4`, which puts the LEM centre over the pad centre; every fourth target deliberately aims 16 pixels left of the pad. |
-| 1950–1951 | Any real key, stick movement, or Shift restarts at line 20. |
-| 1952–1967 | Measure horizontal/vertical error; remain high while crossing, then choose a late-burn vertical target and desired horizontal correction. |
-| 1968–1974 | Turn the desired correction into the same synthetic joystick bits (`jv`) used by human input, then fall through to normal rotation/thrust handling at line 170. |
+| 1950–1952 | Any real key, stick movement, or Shift restarts at line 20. Do not add a `PEEK(197)` guard around a `GET` here: `PEEK(197)` reads 64 when no key is down, so the test is always true and the extra `GET` would clear the `z$` line 160 just read. |
+| 1953–1967 | Measure horizontal/vertical error; remain high while crossing, then choose a late-burn vertical target and desired horizontal correction. |
+| 1968–1975 | Turn the desired correction into the same synthetic joystick bits (`jv`) used by human input, then fall through to normal rotation/thrust handling at line 170. |
 | 1980–1984 | Keyboard fallback: cursor right/down set the same rotate bits while preserving the stick's fire bit. |
 
 The autopilot does not have a special physics path. It simply manufactures the

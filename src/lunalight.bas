@@ -1,5 +1,5 @@
   10 rem save"luna081426",8,1
-  20 clr:poke55,0:poke56,136:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
+  20 clr:printchr$(8):poke56576,(peek(56576)and252)or1:poke648,132:poke53272,20:rv$="luna2":bl$="                                        "
   25 dimpx(5),pw(5),py(5),pb(5),rf(5),ph(5),h(39)
   30 sys17408:sys16896:gosub1020:sys16899:gosub990
   40 poke55,0:poke56,160:poke53269,0:poke53272,20:print"{clr}":v=53248:s=54272:c$="{left} ":poke53280,11:poke53281,0:sn=34272:bc=21504:rb=18432:rz=1
@@ -105,7 +105,7 @@
   795 ifnfgoto982
   835 ifamthengosub1920
   839 rem screen sits at $8400 inside the string heap's descent; collect here
- 840 tp=.:fu=fe:bs=.:gc=fre(.):poke679,10:sys17420:goto90
+  840 tp=.:fu=fe:bs=.:gc=fre(.):poke679,10:sys17420:gosub1197:pokev+21,peek(v+21)and188:goto90
   900 rv=peek(rb+ri):ri=ri+1:return
   960 getz$
   970 ifz$="{f7}"thenpt=.:tp=.:nm=4:nf=.:fe=1000:n2=25:gosub986:gosub1100:goto840
@@ -117,7 +117,7 @@
   990 forl=54272to54296:pokel,0:next
   1000 poke54296,10:poke54277,64:poke54273,17:poke54272,37:poke54276,17
   1010 poke679,1:sys17420:poke54276,16:return
-  1020 am=.:poke53269,.:poke53272,18:print"{clr}":poke53280,11:poke53281,0
+  1020 am=.:poke53269,.:poke53264,.:poke53271,.:poke53278,.:poke53279,.:poke53272,18:print"{clr}":poke53280,11:poke53281,0
   1025 poke34808,187:poke34809,246:poke34810,253:poke34811,254:poke34812,243:poke34813,245:poke34814,195:poke34815,244
   1026 poke53248,124:poke53249,104:poke53250,124:poke53251,104:poke53252,44:poke53253,48:poke53254,44:poke53255,48
   1027 poke53256,160:poke53257,124:poke53258,160:poke53259,124:poke53260,124:poke53261,104:poke53262,180:poke53263,52
@@ -129,7 +129,7 @@
   1050 poke214,18:print:print"{lblu}          - t.hardison"
   1055 print"{down}";
   1060 printtab(11);
-  1065 poke33836,248:poke33907,248:poke33955,248:poke34026,248:poke34118,248:poke34184,248:poke34247,248:poke34346,248:ta=ti:tm=180:ty=104:td=1
+  1065 poke33836,248:poke33907,248:poke33955,248:poke34026,248:poke34118,248:poke34184,248:poke34247,248:poke34346,248:ta=ti:tm=180:ty=104:bd=1:tw=.
   1070 print"press {rvon}f7{rvof} to start"
   1071 rem announce attract mode in seconds
   1072 sl=peek(16902)+peek(16903)*256:rem printtab(7)"{lblu}attract mode in"int(sl/60+.5)"seconds"
@@ -141,10 +141,10 @@
   1088 iftt>=slthenam=1:return
   1090 goto1080
   1092 ifti-ta<4thenreturn
-  1093 ta=ti:tm=tm+1:iftm>240thentm=144
-  1094 ty=ty+td:ifty<100orty>112thentd=-td
+  1093 ta=ti:tw=(tw+1)and3:tm=tm+1:iftm>240thentm=144
+  1094 ty=ty+bd:ifty<100orty>112thenbd=-bd
   1095 poke53262,tm:poke53249,ty:poke53251,ty:poke53261,ty
-  1096 if(tiand8)thenpoke53269,255:poke33836,249:poke34026,249:poke34184,249:poke34247,248:return
+  1096 iftw>1thenpoke53269,255:poke33836,249:poke34026,249:poke34184,249:poke34247,248:return
   1097 poke53269,191:poke33836,248:poke34026,248:poke34184,248:poke34247,249:return
   1100 print"{clr}":pokev+21,0:sys17411:ri=.:tc=12:td=11
   1102 hh=3:sg=.
@@ -193,7 +193,7 @@
   1211 poke34813,245:pokev+10,fx:pokev+11,fy:pokev+44,6
   1212 poke34815,244:pokev+14,mx:pokev+15,55:pokev+46,15:pokev+21,peek(v+21)or162
   1213 rem or162 re-arms the fill, field and module bits; 1214 the lander msb
-  1214 ife2thenpokev+16,peek(v+16)or1
+  1214 ife2thenpokev+16,fh
   1215 return
   1270 getz$
   1280 ifz$="{f1}"thenpoke33792,160:poke55296,0:goto200
@@ -238,30 +238,30 @@
   1925 tx=px(al)+4:af=(af+1)and3:ifaf=.thentx=px(al)-16
   1926 ap=.:return
   1950 rem float autopilot: cross high, release into a dive, then one late burn
-  1951 ifz$<>""or(jvand31)<>31orpeek(653)then20
-  1952 ae=tx-pp:ife2thenae=ae-256
-  1953 aa=abs(ae):ag=py(al)-po:ifag<1thenag=1
-  1954 ifap=.thenifaa<=90thenifag<=(m2-3)*(m2+8)/24+4thenap=1
-  1955 av=60:ifapthenav=3
-  1956 ifap=.thenifaa>90thenifpo>60thenav=.
-  1957 ah=int(sqr(8*aa))
-  1958 ifaa>90then1962
-  1959 ab=int(aa*m2/(5*ag)):ifm2<1thenab=16
-  1960 ifab<5thenab=5
-  1961 ifab<ahthenah=ab
-  1962 ifah>16thenah=16
-  1963 ifaa<6thenah=.
-  1964 ifae<.thenah=-ah
-  1965 ifm2<-2thenah=hm
-  1966 jt=16:ifm2>avthenjt=.
-  1967 jv=15+jt:dh=ah-hm
-  1968 ifdh>.thenifp<>188thenjv=7+jt:goto170
-  1969 ifdh>.thenjv=15:goto170
-  1970 ifdh<.thenifp<>194thenjv=11+jt:goto170
-  1971 ifdh<.thenjv=15:goto170
-  1972 ifp=188orp=189thenjv=11+jt:goto170
-  1973 ifp<>187thenjv=7+jt
-  1974 goto170
+  1952 ifz$<>""or(jvand31)<>31orpeek(653)then20
+  1953 ae=tx-pp:ife2thenae=ae-256
+  1954 aa=abs(ae):ag=py(al)-po:ifag<1thenag=1
+  1955 ifap=.thenifaa<=90thenifag<=(m2-3)*(m2+8)/24+4thenap=1
+  1956 av=60:ifapthenav=3
+  1957 ifap=.thenifaa>90thenifpo>60thenav=.
+  1958 ah=int(sqr(8*aa))
+  1959 ifaa>90then1963
+  1960 ab=int(aa*m2/(5*ag)):ifm2<1thenab=16
+  1961 ifab<5thenab=5
+  1962 ifab<ahthenah=ab
+  1963 ifah>16thenah=16
+  1964 ifaa<6thenah=.
+  1965 ifae<.thenah=-ah
+  1966 ifm2<-2thenah=hm
+  1967 jt=16:ifm2>avthenjt=.
+  1968 jv=15+jt:dh=ah-hm
+  1969 ifdh>.thenifp<>188thenjv=7+jt:goto170
+  1970 ifdh>.thenjv=15:goto170
+  1971 ifdh<.thenifp<>194thenjv=11+jt:goto170
+  1972 ifdh<.thenjv=15:goto170
+  1973 ifp=188orp=189thenjv=11+jt:goto170
+  1974 ifp<>187thenjv=7+jt
+  1975 goto170
   1980 ifz$="{rght}"thenjv=(jvand16)+7
   1982 ifz$="{down}"thenjv=(jvand16)+11
   1984 return

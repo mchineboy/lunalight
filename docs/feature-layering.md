@@ -31,7 +31,7 @@ altered.
 | Canonical build with the flag's two-sprite colour layover | 11,829-byte PRG | `$0801-$3633` | `$41FF` | 3,020 bytes |
 | Canonical build with the tempo-derived attract deadline | 11,862-byte PRG | `$0801-$3654` | `$41FF` | 2,987 bytes |
 | Canonical build with opaque attitude-matched LEM fills and current title/attract fixes | 11,977-byte PRG | `$0801-$36C7` | `$41FF` | 2,872 bytes |
-| Canonical build with animated RAM-charset title tableau and attached exhaust | 12,778-byte PRG | `$0801-$39E8` | `$41FF` | 2,071 bytes |
+| Canonical build with animated RAM-charset title tableau, attached exhaust and the title/attract regression fixes | 12,836-byte PRG | `$0801-$3A22` | `$41FF` | 2,013 bytes |
 
 The last three rows were measured in this promotion run (`make blitz-bank0` and
 `make blitz` from a clean `build/`, plus `tools/bank2-capacity.py`). The first and
@@ -54,8 +54,8 @@ Derived from those measurements:
 - The relocation raised the reachable ceiling from `$2E7B` to `$41FF`, a
   **4,996-byte** headroom gain. At the original promotion point, **3,416 bytes**
   remained free above the 11,433-byte code image; the current title tableau build
-  retains **2,071 bytes** before music.
-- The current code would overrun the old bank-0 sprite start by **2,925 bytes**;
+  retains **2,013 bytes** before music.
+- The current code would overrun the old bank-0 sprite start by **2,983 bytes**;
   the bank-2 relocation remains what makes the full feature set possible.
 - The integrated candidate measured during the bank-0 era was 12,316 bytes ending
   `$381A`. The promoted integrated build is **883 bytes smaller**, and the
@@ -245,8 +245,10 @@ Attract game over no longer resets lives and flies forever: line 792 clears
 (`attract.game_over_returns_to_title`). The current title deliberately claims the
 sprites for its animated tableau: lines 1020-1028 select the `$8800` RAM character
 set, establish the title pointers and enable every tableau sprite (with sprite 6
-pulsing for the exhaust). Line 40 disables that tableau and restores the flight
-character source. The verifier checks title re-entry with
+pulsing for the exhaust). `MEMSIZ` stays at `$A000` on the title as well as in
+flight (see "Title `MEMSIZ` and the sprite pointers" below). Line 40 disables the
+tableau and restores the flight character source. The
+verifier checks title re-entry with
 `title.tableau_reestablished_after_flight` rather than expecting `$D015` to be
 clear.
 
@@ -625,6 +627,78 @@ This hazard is specific to bank 2. In `archived/lunalight-bank0.bas` the screen 
 `$0400`, far below the heap's floor, so the fallback collects normally and needs
 no equivalent.
 
+### Title tableau regressions: three separate faults
+
+The animated title tableau landed with three defects that surfaced in sequence.
+All three are worth keeping on the record because two of them look like memory
+corruption and none of them are in the physics.
+
+**`ILLEGAL QUANTITY` on returning to the title.** The star twinkle alternated on
+`IF (TI AND 8)`. `AND` coerces its operands to a signed 16-bit integer, and `TI`
+is the jiffy clock counting from power-on, so once uptime passed 32767 jiffies —
+about nine minutes, which one title pass plus one attract session comfortably
+exceeds — the `AND` raised `ILLEGAL QUANTITY ERROR`. The twinkle now runs off
+`tw=(tw+1)and3` in line 1093 with `tw>1` as the phase test in line 1096: same
+two-call cadence, bounded operand. Nothing else in the file ANDs `TI`; the
+elapsed-time arithmetic in lines 1086 and 1092 stays in floating point.
+
+### Title `MEMSIZ` and the sprite pointers
+
+**Sprite corruption after the first landing.** The title character page at
+`$8800-$8FFF` sits in the string heap's descent path, and the first attempt to
+protect it lowered `MEMSIZ` to `$8800` around the title. That is exactly one page
+too high: `MEMSIZ` is the *top* of string space, so the heap's first byte is
+`$87FF` and its top 8 bytes are the sprite pointers at `$87F8-$87FF`. The forced
+collection in line 840 compacts the heap up against `MEMSIZ`, so the first round
+that ended — the first attract landing — rewrote all eight sprite pointers with
+string data. Whether `MEMSIZ` was set before or after `CLR` only changed which
+frame it happened on.
+
+There is no room for a lowered ceiling here: the screen matrix ends at `$87E7`,
+leaving 16 usable bytes below the pointers. `MEMSIZ` therefore stays at `$A000`
+everywhere, and the character page is protected the same way the screen matrix
+already was — by the per-round `gc=fre(.)` in line 840, which keeps live strings
+within a few hundred bytes of `$A000` and roughly 4 KB clear of `$8FFF`. Pinned
+by `title.memsiz_clear_of_sprite_pointers` (title) and
+`title.reentry_uses_normal_memsiz` (all three attract exits), with
+`title.reentry_f7_starts_flight` proving a returned title still starts a game.
+
+### Straight-line flag placement, and why 1197 must not be a conditional tail
+
+**Terrain drawn, then an apparent hang with spreading corruption.** An attempt to
+make the flag-placement code reusable folded its unconditional tail into the
+`IF fx>255` clause:
+
+```text
+1197 fx=px(rz)-3:fm=.:iffx>255thenfm=48:fx=fx-256:fh=67+fm:fy=py(rz)-5:return
+1198 gosub1197:gosub1210
+```
+
+In CBM BASIC everything after `THEN` belongs to the conditional, `RETURN`
+included. On the common `fx<=255` path line 1197 therefore fell through into line
+1198, which `GOSUB`ed straight back into 1197, and recursed without bound. The
+symptom is the giveaway: the terrain finishes drawing, the machine appears to
+hang, and RAM is progressively overwritten as the return-address stack runs off
+the end of its page — which is why it reads like terrain generation gone wrong
+rather than a control-flow fault. `fh` and `fy` were also left unset on that
+path, so `$D010` was written as `0` by line 1214.
+
+The placement code is back to straight-line form — line 1197 computes `fx`/`fm`,
+line 1198 computes `fh`/`fy` and `GOSUB`s 1210 — and line 840 re-enters at 1197
+so a new round re-places the flag and rewrites the sprite pointers after the
+collection. Pinned by the `1197`/`1198` entries in the `lem_fill` line map.
+
+### Attract mode also lost its autopilot
+
+The same pass rewrote line 160 as `ifam=.thengetz$:jv=peek(56320):ifamthen1950`.
+With `am` set, the whole line is skipped — including the branch to the autopilot —
+so the demo coasted on a stale `jv` and never steered. Line 160 is back to
+`getz$:jv=peek(56320):ifamthen1950`; the autopilot needs that fresh `jv` for its
+own exit test in line 1952. A guard added at the top of the autopilot,
+`ifpeek(197)thengetz$`, was removed with it: `PEEK(197)` reads 64 when no key is
+down, so the test was always true and the extra `GET` wiped the `z$` line 160 had
+just fetched, breaking key-exits-attract.
+
 ## Optimization experiments (bank-2 relocation era)
 
 | Experiment | Original-Blitz result | Motion result | Decision |
@@ -647,9 +721,9 @@ range and proves the result still runs. With `BANK2_RUNTIME_RESERVE=1536`:
 
 | Region | Range | Bytes |
 | --- | --- | --- |
-| Canonical code | `$0801-$39E8` | 12,776 loaded code bytes (12,778-byte PRG) |
-| Zero-filled runtime workspace for BASIC's variables | `$39E9-$3FE8` | 1,536 |
-| `0xAA` filler through the ceiling | `$3FE9-$41FF` | 535 |
+| Canonical code | `$0801-$3A22` | 12,834 loaded code bytes (12,836-byte PRG) |
+| Zero-filled runtime workspace for BASIC's variables | `$3A23-$4022` | 1,536 |
+| `0xAA` filler through the ceiling | `$4023-$41FF` | 477 |
 
 The padded artifact is the input to `make verify-bank2-capacity`, which runs the
 motion oracle and full runtime suite and checks that the filler above BASIC's
@@ -663,11 +737,11 @@ and strings grow above the code as the game runs; the startup `STREND` snapshot
 filler overwrote live runtime data, perturbing emulation timing and the demo's
 descent. The larger reserve keeps the filler clear of that working set, so the
 capacity proof measures free space without disturbing the running program. It
-still demonstrates 535 bytes of contiguous filler plus the reserve above the
+still demonstrates 477 bytes of contiguous filler plus the reserve above the
 code, well clear of the music player at `$4200`. The title's separate character
-page at `$8800` does not consume this executable headroom: it is protected from
-the title's string allocations by temporarily lowering `MEMSIZ` to `$8800`, then
-flight restores the normal `$A000` ceiling.
+page at `$8800` does not consume this executable headroom, and it is not
+protected by a `MEMSIZ` change either — the per-round collection in line 840 is
+what keeps the heap from ever descending that far.
 
 ## Verification summary
 
@@ -676,7 +750,7 @@ flight restores the normal `$A000` ceiling.
 | `make verify-baseline` | Exact byte match: `archived/luna081426.bas` retokenizes to `current/luna081426` |
 | `make verify-blitz-motion` (canonical, `$8400`/`$87F8`/`$AE7C`) | 6 of 6 samples within the recorded tolerances |
 | `make verify-bank0-motion` (fallback, `$0400`/`$07F8`) | 6 of 6 samples within the recorded tolerances |
-| `make verify-bank2` (canonical runtime suite) | Canonical runtime gate, including the RAM title charset, its `$8800` heap guard, title tableau re-entry, four-cell pad geometry, two-colour flag layover, bounded LEM fills, attract cadence and string-heap reclamation |
+| `make verify-bank2` (canonical runtime suite) | Canonical runtime gate, including the RAM title charset, the `$A000` heap ceiling on every title entry (`title.memsiz_clear_of_sprite_pointers`, `title.reentry_uses_normal_memsiz`), attract return plus F7 flight restart (`title.reentry_f7_starts_flight`), title tableau re-entry, four-cell pad geometry, two-colour flag layover, bounded LEM fills, attract cadence and string-heap reclamation |
 | `make verify-blitz-gameplay` (canonical aggregate) | Motion oracle plus the canonical runtime suite |
 | `make verify-bank2-capacity` | Padded artifact (`BANK2_RUNTIME_RESERVE=1536`): motion oracle, runtime suite and `capacity.free_filler_intact_above_basic_data` |
 | Attract soak, post-fix | 7,870 C64 seconds (131 minutes) of continuous demo: lowest `FRETOP $9F88`, peak heap in flight 120 bytes, no descent toward the screen matrix |

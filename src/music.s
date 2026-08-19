@@ -76,9 +76,12 @@ loop_jiffies:
     .word sequence_length * step_ticks
 
 install:
-    lda installed
-    bne install_done
-    jsr silence
+    ; uninstall first so a second SYS 16896 without an intervening SYS 16899
+    ; cannot capture play_irq as its own old_irq and chain to itself. It also
+    ; silences the SID and re-seats the sequencer at step 0, so every title
+    ; entry starts the song from the top and the attract deadline read from
+    ; loop_jiffies really is one whole pass.
+    jsr uninstall
     sei
     lda irq_vector
     sta old_irq

@@ -16,7 +16,10 @@ from typing import Any
 
 from vice_monitor import ViceMonitor
 
-TITLE_NEEDLES = ("l u n a l i g h t", "press f7 to start")
+# The bank-2 title paints its logo from the RAM character set at $8800, so the
+# word "lunalight" is no longer PETSCII on screen. Match the prompt only, the
+# way tools/verify-bank2.py does, so this driver works on both layouts.
+TITLE_NEEDLES = ("press f7 to start",)
 FLIGHT_NEEDLES = ("vel", "fuel", "horz")
 # Fixture-lineage VIC bank 0 layout; the canonical bank-2 package overrides these.
 DEFAULT_SCREEN_BASE = 0x0400

@@ -57,6 +57,12 @@ MUSIC_START = 0x4200
 MUSIC_END = 0x4400
 TITLE_D018 = 0x12
 TITLE_CHARSET_ADDRESS = 0x8800
+# MEMSIZ must stay at $A000 on the title as well as in flight. Lowering it to
+# the title character page put the top of the descending string heap at $87FF,
+# straight over the sprite pointers at $87F8-$87FF, so the forced collection in
+# line 840 rewrote them the first time a round ended. The heap is kept clear of
+# $8800 by that collection instead, not by a MEMSIZ guard.
+FLIGHT_MEMSIZ = 0xA000
 TITLE_SPRITE_POINTERS = [187, 246, 253, 254, 243, 245, 195, 244]
 # The lander graphic fills its 24-pixel sprite, so its centre sits half a sprite
 # right of the $D000 value the landing verdict reads.
@@ -528,7 +534,7 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
     # $D010=fm, which clears the lander's X-MSB. A craft that touched down past
     # sprite X 255 (e2=1) would therefore jump 256 pixels left off its pad. The
     # bit is restored in the bank-2-only module routine that 720 gosubs.
-    msb_restore = "ife2thenpokev+16,peek(v+16)or1"
+    msb_restore = "ife2thenpokev+16,fh"
     report.check(
         "landing.lander_x_msb_restored_on_pad",
         1214 in variant and _normalize(msb_restore) in _normalize(variant[1214]),
@@ -572,7 +578,8 @@ def landing_logic(args: argparse.Namespace, report: Report) -> None:
         235: "pokev+21,191",
         430: "pokev,pp:pokev+1,po:pokev+2,pp:pokev+3,po",
         435: "ifqthenpokev+12,pp:pokev+13,po",
-        1198: "fh=67+fm",
+        1197: "fx=px(rz)-3:fm=.",
+        1198: "fh=67+fm:fy=py(rz)-5:gosub1210",
         1212: "pokev+21,peek(v+21)or162",
     }
     lem_fill_diff = [
@@ -983,7 +990,7 @@ def check_title(session: Session, report: Report) -> None:
     title_memsiz_raw = session.monitor.memory_paused(0x37, 0x38)
     title_memsiz = title_memsiz_raw[0] | title_memsiz_raw[1] << 8
     report.equal("title.tableau_sprite_pointers", title_pointers, TITLE_SPRITE_POINTERS)
-    report.equal("title.charset_guard_memsiz", title_memsiz, TITLE_CHARSET_ADDRESS)
+    report.equal("title.memsiz_clear_of_sprite_pointers", title_memsiz, FLIGHT_MEMSIZ)
     report.check(
         "title.tableau_sprites_enabled",
         title_enable in (COAST_ENABLE, THRUST_ENABLE),
@@ -1049,6 +1056,7 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
     bonus_seen = False
     highs: set[int] = set()
     title_sprites: dict[str, int] = {}
+    title_memsizes: dict[str, int] = {}
     try:
         monitor.set_joyport(1, 0x1F)
         session.wait_for_screen(TITLE_NEEDLES, args.startup_timeout)
@@ -1057,12 +1065,18 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         keyboard_text = "\n".join(keyboard_demo).lower()
         monitor.inject_paused(CURSOR_RIGHT)
         keyboard_exit = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        raw = monitor.memory_paused(0x37, 0x38)
+        title_memsizes["keyboard_exit"] = raw[0] | raw[1] << 8
+        monitor.resume()
         title_sprites["keyboard_exit"] = sprites_enabled(session)
 
         joystick_demo = trigger_attract(session)
         joystick_text = "\n".join(joystick_demo).lower()
         monitor.set_joyport(1, 0x17)
         joystick_exit = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        raw = monitor.memory_paused(0x37, 0x38)
+        title_memsizes["joystick_exit"] = raw[0] | raw[1] << 8
+        monitor.resume()
         title_sprites["joystick_exit"] = sprites_enabled(session)
         monitor.set_joyport(1, 0x1F)
 
@@ -1142,7 +1156,13 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
         session.snapshot("outcome")
         monitor.inject_paused(CURSOR_RIGHT)
         final_title = session.wait_for_screen(TITLE_NEEDLES, 20.0)
+        raw = monitor.memory_paused(0x37, 0x38)
+        title_memsizes["final_exit"] = raw[0] | raw[1] << 8
+        monitor.resume()
         title_sprites["final_exit"] = sprites_enabled(session)
+        monitor.inject_paused(F7)
+        monitor.stop_on_store(0xD000)
+        reentry_flight = session.wait_for_screen(FLIGHT_NEEDLES, 20.0)
 
         keyboard_exit_text = "\n".join(keyboard_exit).lower()
         joystick_exit_text = "\n".join(joystick_exit).lower()
@@ -1219,6 +1239,17 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             [line for line in final_title if line.strip()],
             list(TITLE_NEEDLES),
         )
+        report.equal(
+            "title.reentry_uses_normal_memsiz",
+            title_memsizes,
+            {name: FLIGHT_MEMSIZ for name in title_memsizes},
+        )
+        report.check(
+            "title.reentry_f7_starts_flight",
+            all(needle in "\n".join(reentry_flight).lower() for needle in FLIGHT_NEEDLES),
+            [line for line in reentry_flight if line.strip()],
+            "F7 from an attract-returned title reaches the flight HUD",
+        )
         # The title deliberately reclaims all eight sprites for its animated
         # tableau.  A title re-entered from flight must establish that mask,
         # rather than inheriting a frozen flight or explosion mask.
@@ -1236,6 +1267,9 @@ def check_attract(args: argparse.Namespace, report: Report) -> None:
             "high_scores_seen": sorted(highs),
             "title_sprite_masks": {
                 name: f"${mask:02X}" for name, mask in title_sprites.items()
+            },
+            "title_reentry_memsizes": {
+                name: f"${memsiz:04X}" for name, memsiz in title_memsizes.items()
             },
             "string_heap": {
                 "seeded_fretop": f"${heap_seed:04X}",
