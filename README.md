@@ -1,6 +1,7 @@
 # lunalight
 
-Commodore 64 lunar lander by Steven Hardison (public domain).
+Commodore 64 lunar lander by Steven Hardison and Tyler Hardison
+([MIT License](LICENSE)).
 
 ![Lunalight title screen and attract-mode landing](docs/lunalight-gameplay.gif)
 
@@ -284,3 +285,8 @@ position drift, not feel.
 
 Note: the lander collides with any character on screen; debug text below row 7
 causes false crashes.
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 1985 Steven Hardison;
+copyright (c) 2026 Steven Hardison.

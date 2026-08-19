@@ -119,11 +119,14 @@
   1010 poke679,1:sys17420:poke54276,16:return
   1020 am=.:poke53269,.:print"{clr}":poke53280,11:poke53281,0
   1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
-  1040 poke214,16:print:print"{lblu}   public domain 2024 steven hardison"
-  1050 print"{down}";
+  1040 poke214,15:print:print"{lblu}   mit license 1985-2026 s.hardison"
+  1045 poke214,17:print:print"{lblu}        contributors:"
+  1050 poke214,18:print:print"{lblu}          - t.hardison"
+  1055 print"{down}";
   1060 printtab(11);
   1070 print"press {rvon}f7{rvof} to start"
-  1072 sl=peek(16902)+peek(16903)*256:printtab(7)"{lblu}attract mode in"int(sl/60+.5)"seconds"
+  1071 rem announce attract mode in seconds
+  1072 sl=peek(16902)+peek(16903)*256:rem printtab(7)"{lblu}attract mode in"int(sl/60+.5)"seconds"
   1074 t0=ti
   1080 getf$:iff$="{f7}"thenreturn
   1082 iff$<>""thent0=ti

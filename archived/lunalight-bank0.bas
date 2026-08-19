@@ -108,7 +108,7 @@
  1010 fort=1to20:next:poke54276,16:return
  1020 print"{clr}":poke53280,11:poke53281,0
  1030 poke214,5:print:printtab(11)"{lblu}l u n a l i g h t";
- 1040 poke214,16:print:print"{lblu}   public domain 2024 steven hardison"
+ 1040 poke214,16:print:print"{lblu}   mit license 1985-2024 hardison"
  1050 print"{down}";
  1060 printtab(11);
  1070 print"press {rvon}f7{rvof} to start"
