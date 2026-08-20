@@ -24,6 +24,7 @@ PHASE1_RESULTS = 0x17A0     # phase 1 findings, inside the RNG scratch region.
                             # $1B00 is the table by then, and $1740 turned out
                             # to be inside the RNG's own code.
 PHASE1_STAGES = 8
+PHASE2_STAGES = 7
 PHASE1_TXTTAB = 0x4001
 WAIT_JIFFIES = 30           # POKEd to the wait argument at $1780
 WAIT_JIFFIES_LONG = 60      # second sample, so a scaling error cannot hide
@@ -72,7 +73,7 @@ class Session:
     """A native-mode x128 with the binary monitor attached."""
 
     def __init__(
-        self, prg: Path, vice: str, log: Path, control_port: bool = False
+        self, target: str, vice: str, log: Path, control_port: bool = False
     ) -> None:
         self.port = free_port()
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +90,13 @@ class Session:
         ]
         if control_port:
             command.extend(("-controlport2device", "37"))
-        command.extend(("-autostart", str(prg.resolve())))
+        # A bare path is resolved so VICE gets an absolute name; an
+        # image:program target is passed through as written.
+        if ":" in target:
+            image, _, program = target.partition(":")
+            command.extend(("-autostart", f"{Path(image).resolve()}:{program}"))
+        else:
+            command.extend(("-autostart", str(Path(target).resolve())))
         self.log = log.open("ab")
         self.vice = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT)
         self.monitor = ViceMonitor("127.0.0.1", self.port, timeout=20.0)
@@ -307,17 +314,175 @@ def check_phase1(session: Session, report: Report, timeout: float) -> None:
     report.note("joystick reads", f"${results[24]:02X} ${results[25]:02X}")
 
 
+class Assets:
+    """The BLOADed asset files, for deriving what the probe should have found.
+
+    The probe reports checksums of what it finds in RAM. Computing the expected
+    values from the same files the disk image carries keeps the two in step
+    without a hand-maintained table, and still catches a BLOAD that lands at the
+    wrong address, loads the wrong file, or loads a truncated one.
+    """
+
+    def __init__(self, specs: list[str]) -> None:
+        self.regions: list[tuple[int, bytes]] = []
+        for spec in specs:
+            address_text, _, path_text = spec.partition(":")
+            raw = Path(path_text).read_bytes()
+            if len(raw) < 3:
+                raise Failure(f"{path_text} is too short to be a PRG")
+            self.regions.append((int(address_text, 0), raw[2:]))
+
+    def checksum(self, address: int, length: int) -> int:
+        for start, body in self.regions:
+            if start <= address and address + length <= start + len(body):
+                offset = address - start
+                return sum(body[offset : offset + length]) & 0xFFFF
+        raise Failure(
+            f"no asset covers ${address:04X}-${address + length - 1:04X}; "
+            "pass it with --asset"
+        )
+
+
+def check_phase2(
+    session: Session, report: Report, timeout: float, assets: Assets
+) -> None:
+    """Phase 2: the VIC bank 0 asset layout, the disk load, and the title tableau."""
+    results = session.wait_for_done(timeout, PHASE1_RESULTS, PHASE2_STAGES)
+
+    print("probe completion")
+    report.check(
+        results[:4] == SIGNATURE,
+        f"probe signature at ${PHASE1_RESULTS:04X}",
+        results[:4].decode("latin-1"),
+        "L128",
+    )
+    report.check(
+        results[22] == PHASE2_STAGES, "stages completed", results[22], PHASE2_STAGES
+    )
+
+    print("BLOAD places every region at its own address in bank 0")
+    for offset, address, length, label in (
+        (4, 0x1300, 492, "title player BLOADed to $1300"),
+        (6, 0x2000, 256, "title charset BLOADed to $2000"),
+        (8, 0x2E7C, 256, "sprite payload BLOADed to $2E7C"),
+    ):
+        expected = assets.checksum(address, length)
+        observed = word(results, offset)
+        report.check(observed == expected, label, observed, expected)
+
+    print("C64 sprite pointers resolve into the payload unchanged")
+    for offset, slot, label in (
+        (26, 187, "lander outline"),
+        (28, 243, "refuel flag"),
+    ):
+        expected = assets.checksum(slot * 64, 64)
+        observed = word(results, offset)
+        report.check(
+            observed == expected and expected != 0,
+            f"pointer {slot} ({label}) resolves to ${slot * 64:04X}, non-blank",
+            f"{observed} (expected {expected})",
+            "matching and non-zero",
+        )
+
+    print("title character set in the GRAPHIC 1 reserve")
+    report.check(
+        (results[10] >> 1) & 0x07 == 4 and (results[10] >> 4) & 0x0F == 1,
+        "$D018 selects the $2000 charset with the screen at $0400",
+        f"${results[10]:02X}",
+        "charset field 4, screen field 1",
+    )
+    report.check(
+        results[11] == 0x18, "$0A2C shadow holds it", f"${results[11]:02X}", "$18"
+    )
+
+    print("title tableau through BASIC 7, with the C64's values")
+    report.check(results[14] == 0xFF, "all eight sprites enabled", results[14], 255)
+    report.check(
+        results[15] == 187 and results[16] == 243,
+        "sprite pointers hold the C64 title values",
+        f"slot 0 = {results[15]}, slot 4 = {results[16]}",
+        "187 and 243",
+    )
+    report.check(
+        results[17] == 124 and results[18] == 104,
+        "MOVSPR placed sprite 0 at the C64 title coordinate",
+        f"X={results[17]}, Y={results[18]}",
+        "X=124, Y=104",
+    )
+    report.check(results[24] == 0, "$D010 clear: no title sprite is past X=255",
+                 f"${results[24]:02X}", "$00")
+    # Two register conventions collide here. BASIC 7 colours run 1-16 where the
+    # VIC registers run 0-15, so the probe passes the C64 value plus one. And
+    # the upper nibble of $D027-$D02E is unused and reads back as 1s, exactly
+    # like bit 0 of $D018, so only the low nibble carries the colour.
+    report.check(
+        results[19] & 0x0F == 1 and results[20] & 0x0F == 6,
+        "SPRITE wrote the C64 title colours into $D027/$D02A",
+        f"$D027 = ${results[19]:02X}, $D02A = ${results[20]:02X}",
+        "low nibbles 1 and 6",
+    )
+    report.check(
+        results[12] == 187 and results[13] == 243,
+        "SPRITE leaves the sprite pointers alone",
+        f"slot 0 = {results[12]}, slot 4 = {results[13]}",
+        "187 and 243, untouched by SPRITE",
+    )
+
+    print("attitude change and free RAM above the window")
+    report.check(
+        results[21] == 188,
+        "attitude change is one pointer POKE, no block copy",
+        results[21],
+        188,
+    )
+    report.check(
+        results[30] == 171,
+        "$1C00 survives heap churn: free after the text relocation",
+        results[30],
+        171,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prg", type=Path, required=True)
-    parser.add_argument("--phase", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--prg", type=Path)
+    parser.add_argument(
+        "--autostart",
+        help="what to hand VICE, e.g. image.d71:progname; defaults to --prg",
+    )
+    parser.add_argument("--phase", type=int, choices=(0, 1, 2), default=0)
+    parser.add_argument(
+        "--asset",
+        action="append",
+        default=[],
+        metavar="ADDR:PRG",
+        help="an asset file and the address it BLOADs to, for expectations",
+    )
     parser.add_argument("--vice", default="x128")
     parser.add_argument("--log", type=Path, default=Path("build/verify-c128-vic.log"))
     parser.add_argument("--timeout", type=float, default=90.0)
     args = parser.parse_args()
 
+    if not (args.prg or args.autostart):
+        raise Failure("pass --prg or --autostart")
+    target = args.autostart or str(args.prg)
+
     report = Report()
-    session = Session(args.prg, args.vice, args.log, control_port=args.phase == 1)
+    if args.phase == 2:
+        assets = Assets(args.asset)
+        session = Session(target, args.vice, args.log)
+        try:
+            check_phase2(session, report, args.timeout, assets)
+        finally:
+            session.close()
+        print()
+        if report.failures:
+            print(f"FAILED {len(report.failures)} check(s): {', '.join(report.failures)}")
+            return 1
+        print("phase 2: VIC bank 0 assets and title tableau verified")
+        return 0
+
+    session = Session(target, args.vice, args.log, control_port=args.phase == 1)
     if args.phase == 1:
         try:
             check_phase1(session, report, args.timeout)

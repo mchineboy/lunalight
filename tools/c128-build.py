@@ -114,16 +114,33 @@ def compose_payload(
             )
         image[offset : offset + len(body)] = body
         occupied[offset : offset + len(body)] = b"\x01" * len(body)
-        regions.append({"name": f"payload@{address:04X}", "start": address, "end": end})
+        regions.append(
+            {
+                "name": f"payload@{address:04X}",
+                "start": address,
+                "end": end,
+                "space": "destination",
+            }
+        )
     return bytes(image), regions
 
 
-def check_layout(regions: list[dict[str, object]]) -> None:
-    ordered = sorted(regions, key=lambda region: region["start"])
+def check_layout(regions: list[dict[str, object]], space: str) -> None:
+    """Reject overlaps within one address space.
+
+    Destination and load-time regions must be checked separately, and never
+    against each other. The payload's destinations sit in $1300-$3FFF while the
+    BASIC text loads across $1C01 and up, so the two overlap by design: the
+    copy runs after GRAPHIC 1 has lifted the text to $4001 and vacated the
+    window. Comparing the two spaces rejects a perfectly good layout.
+    """
+    ordered = sorted(
+        (r for r in regions if r.get("space") == space), key=lambda r: r["start"]
+    )
     for lower, upper in zip(ordered, ordered[1:]):
         if lower["end"] >= upper["start"]:
             raise BuildError(
-                f"layout overlap: {lower['name']} "
+                f"{space} overlap: {lower['name']} "
                 f"${lower['start']:04X}-${lower['end']:04X} meets "
                 f"{upper['name']} ${upper['start']:04X}-${upper['end']:04X}"
             )
@@ -183,13 +200,19 @@ def main() -> int:
             raise BuildError(f"{args.basic} has no line 9000 DATA marker")
         body += data_lines(gateway, first_line=9000, step=1, per_line=16)
         regions.append(
-            {"name": "gateway", "start": gateway_addr, "end": gateway_end}
+            {
+                "name": "gateway",
+                "start": gateway_addr,
+                "end": gateway_end,
+                "space": "destination",
+            }
         )
         regions.append(
             {
                 "name": "results",
                 "start": RESULTS_BLOCK[0],
                 "end": RESULTS_BLOCK[1],
+                "space": "destination",
             }
         )
     else:
@@ -214,7 +237,12 @@ def main() -> int:
         raise BuildError(f"BASIC 7 text must load at $1C01, got ${basic_addr:04X}")
     basic_end = basic_addr + len(basic) - 1
     regions.append(
-        {"name": "basic-text-at-load", "start": basic_addr, "end": basic_end}
+        {
+            "name": "basic-text-at-load",
+            "start": basic_addr,
+            "end": basic_end,
+            "space": "load",
+        }
     )
 
     if payload:
@@ -224,18 +252,22 @@ def main() -> int:
                 f"${args.stage:04X}; raise the stage or shrink the program"
             )
         pad = args.stage - (basic_end + 1)
-        args.out.write_bytes(
-            args.out.read_bytes() + bytes(pad) + payload
-        )
+        args.out.write_bytes(args.out.read_bytes() + bytes(pad) + payload)
         regions.append(
             {
                 "name": "payload-stage",
                 "start": args.stage,
                 "end": args.stage + len(payload) - 1,
+                "space": "load",
             }
         )
+        print(
+            f"{'padding':<20} ${basic_end + 1:04X}-${args.stage - 1:04X} "
+            f"{pad:5d} bytes to reach the stage"
+        )
 
-    check_layout(regions)
+    check_layout(regions, "destination")
+    check_layout(regions, "load")
 
     # After GRAPHIC 1 the interpreter reserves $2000-$3FFF and lifts the text to
     # $4001, so the report records both homes: the load-time span above and the
@@ -245,6 +277,7 @@ def main() -> int:
         "prg": str(args.out),
         "regions": regions,
         "payload_bytes": len(payload),
+        "window": {"start": FREE_RAM[0], "end": FREE_RAM[1]},
         "graphic1": {
             "bitmap_reserve": {"start": 0x2000, "end": 0x3FFF},
             "relocated_text": {"start": 0x4001, "end": relocated_end},
@@ -260,11 +293,15 @@ def main() -> int:
         }
     args.report.write_text(json.dumps(report, indent=2) + "\n")
 
-    for region in sorted(regions, key=lambda item: item["start"]):
-        print(
-            f"{region['name']:<20} ${region['start']:04X}-${region['end']:04X} "
-            f"{region['end'] - region['start'] + 1:5d} bytes"
-        )
+    for space in ("destination", "load"):
+        for region in sorted(
+            (r for r in regions if r.get("space") == space),
+            key=lambda item: item["start"],
+        ):
+            print(
+                f"{region['name']:<20} ${region['start']:04X}-${region['end']:04X} "
+                f"{region['end'] - region['start'] + 1:5d} bytes  {space}"
+            )
     print(
         f"{'relocated text':<20} $4001-${relocated_end:04X} "
         f"(after graphic 1; $2000-$3FFF reserved)"

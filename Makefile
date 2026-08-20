@@ -78,6 +78,21 @@ C128_PARITY_DRIVER := $(TOOLS_DIR)/c128-parity.py
 C128_PHASE1_PRG := $(BUILD_DIR)/lunalight-c128-phase1.prg
 C128_PHASE1_REPORT := $(BUILD_DIR)/c128-phase1-layout.json
 C128_STAGE := 0x4000
+# Phase 2 places every asset the VIC needs into one contiguous 45-page window,
+# $1300-$3FFF, so a single block copy from the stage does the whole load. The
+# stage clears the relocated BASIC text, which GRAPHIC 1 lifts to $4001.
+C128_PHASE2_SRC := $(C128_DIR)/phase2.bas
+C128_LOADER_SRC := $(C128_DIR)/loader.s
+C128_LOADER_CFG := $(TOOLS_DIR)/c128-loader.cfg
+C128_PHASE2_PRG := $(BUILD_DIR)/lunalight-c128-phase2.prg
+C128_PHASE2_REPORT := $(BUILD_DIR)/c128-phase2-layout.json
+C128_ASSET_TOOL := $(TOOLS_DIR)/c128-asset.py
+C128_MUSIC_PRG := $(BUILD_DIR)/c128-music.prg
+C128_RNG_PRG := $(BUILD_DIR)/c128-rng.prg
+C128_CHARSET_PRG := $(BUILD_DIR)/c128-charset.prg
+C128_SPRITES_PRG := $(BUILD_DIR)/c128-sprites.prg
+C128_PHASE2_BASIC := $(BUILD_DIR)/c128-phase2-basic.prg
+C128_PHASE2_D71 := $(BUILD_DIR)/lunalight-c128-phase2.d71
 
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
 # It compiles the canonical source and reserves the canonical bank-2 asset
@@ -146,7 +161,7 @@ GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
 	verify-baseline record-blitz-baseline verify-blitz-gameplay verify-blitz-motion \
 	verify-bank0-motion verify-bank2-motion verify-bank2 verify-bank2-capacity \
 	bank2-capacity c128-vic run-c128-vic verify-c128-vic \
-	verify-c128-phase0 verify-c128-phase1 c128-parity
+	verify-c128-phase0 verify-c128-phase1 verify-c128-phase2 c128-parity
 
 # Every VICE-driven target owns the emulator, its binary monitor port and its
 # screenshots; parallel makes would interleave them.
@@ -500,13 +515,45 @@ $(C128_PHASE1_PRG) $(C128_PHASE1_REPORT): $(C128_PHASE1_SRC) $(SRC_DIR)/music.s 
 		--report $(C128_PHASE1_REPORT) \
 		--petcat $(PETCAT) --ca65 $(CA65) --ld65 $(LD65)
 
-c128-vic: $(C128_PHASE0_PRG) $(C128_PHASE1_PRG)
+# One asset file per region, each PRG headered with the address it BLOADs to.
+$(C128_MUSIC_PRG): $(SRC_DIR)/music.s $(C128_MUSIC_CFG) | $(BUILD_DIR)
+	$(CA65) -t none -D 'LOAD_ADDR=$$1300' -D STEP_TICKS=18 \
+		-D LOOP_JIFFY_NUM=6 -D LOOP_JIFFY_DEN=5 \
+		-o $(BUILD_DIR)/c128-music.o $<
+	$(LD65) -C $(C128_MUSIC_CFG) -o $@ $(BUILD_DIR)/c128-music.o
+
+$(C128_RNG_PRG): $(SRC_DIR)/rng.s $(C128_RNG_CFG) | $(BUILD_DIR)
+	$(CA65) -t none -D C128=1 -D 'LOAD_ADDR=$$1500' -D 'WAITJ=$$1780' \
+		-o $(BUILD_DIR)/c128-rng.o $<
+	$(LD65) -C $(C128_RNG_CFG) -o $@ $(BUILD_DIR)/c128-rng.o
+
+$(C128_CHARSET_PRG): $(TITLE_CHARSET) $(C128_ASSET_TOOL) | $(BUILD_DIR)
+	$(PYTHON) $(C128_ASSET_TOOL) $< $@ --address 0x2000
+
+$(C128_SPRITES_PRG): $(SPRITES_OUT) $(C128_ASSET_TOOL) | $(BUILD_DIR)
+	$(PYTHON) $(C128_ASSET_TOOL) $< $@ --address 0x2e7c --max-end 0x3fff
+
+$(C128_PHASE2_BASIC): $(C128_PHASE2_SRC) | $(BUILD_DIR)
+	$(PETCAT) -w70 -o $@ -- $<
+
+$(C128_PHASE2_D71): $(C128_PHASE2_BASIC) $(C128_MUSIC_PRG) $(C128_RNG_PRG) \
+		$(C128_CHARSET_PRG) $(C128_SPRITES_PRG)
+	rm -f $@
+	$(C1541) -format "lunalight c128,01" d71 $@ \
+		-write $(C128_PHASE2_BASIC) phase2 \
+		-write $(C128_MUSIC_PRG) music \
+		-write $(C128_RNG_PRG) rng \
+		-write $(C128_CHARSET_PRG) charset \
+		-write $(C128_SPRITES_PRG) sprites
+
+c128-vic: $(C128_PHASE0_PRG) $(C128_PHASE1_PRG) $(C128_PHASE2_D71)
 
 # Native mode only: +go64 keeps the machine in C128 mode across the reset.
 run-c128-vic: $(C128_PHASE0_PRG)
 	$(X128) -default +go64 +autostart-delay-random -autostart $(C128_PHASE0_PRG)
 
-verify-c128-vic: c128-parity verify-c128-phase0 verify-c128-phase1
+verify-c128-vic: c128-parity verify-c128-phase0 verify-c128-phase1 \
+	verify-c128-phase2
 
 verify-c128-phase0: $(C128_PHASE0_PRG)
 	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE0_PRG) --phase 0 \
@@ -515,6 +562,14 @@ verify-c128-phase0: $(C128_PHASE0_PRG)
 verify-c128-phase1: $(C128_PHASE1_PRG)
 	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE1_PRG) --phase 1 \
 		--timeout 240 --vice $(X128) --log $(BUILD_DIR)/verify-c128-phase1.log
+
+verify-c128-phase2: $(C128_PHASE2_D71)
+	$(PYTHON) $(C128_VERIFY_DRIVER) --autostart '$(C128_PHASE2_D71):phase2' \
+		--phase 2 --timeout 240 --vice $(X128) \
+		--asset '0x1300:$(C128_MUSIC_PRG)' \
+		--asset '0x2000:$(C128_CHARSET_PRG)' \
+		--asset '0x2e7c:$(C128_SPRITES_PRG)' \
+		--log $(BUILD_DIR)/verify-c128-phase2.log
 
 # The C128 edition reuses src/music.s and src/rng.s behind assembly-time
 # defines. This proves the canonical C64 blobs are unaffected by that reuse.

@@ -74,7 +74,7 @@ player owns.
 
 ## Evidence gathered before implementation
 
-Items 1-5 were the pre-Phase-0 desk analysis. Items 6-16 are measured, and
+Items 1-5 were the pre-Phase-0 desk analysis. Items 6-19 are measured, and
 `make verify-c128-vic` re-measures them on every change.
 
 1. `petcat -w70` tokenizes the present BASIC text as C128 BASIC 7.0 at `$1C01`
@@ -169,7 +169,54 @@ Items 1-5 were the pre-Phase-0 desk analysis. Items 6-16 are measured, and
     Related, and worth stating once: bit 0 of `$D018` is unused on the VIC-IIe
     and reads back as 1, so a `POKE` of `$18` reads as `$19`. Assert the screen
     and charset fields, never the whole byte.
-16. The C64 editor and keyboard constants, measured with the cursor deliberately
+16. **`GRAPHIC 1` zeroes bank-0 RAM above the relocated text, and nothing
+    below it.** Measured by writing a marker to every candidate staging address
+    and reading them back afterwards:
+
+    | address | after `GRAPHIC 1` |
+    | --- | --- |
+    | `$1300`, `$1B00`, `$1C00` | survives |
+    | `$2000`, `$2800`, `$3000`, `$3FFF` | survives |
+    | `$4000`, `$5000`, `$6000`, `$8D00` | zeroed |
+
+    A 29 KB autostart PRG does load in full -- `$6000` and `$8D00` both read
+    back correctly under `BANK 0` before `GRAPHIC 1` runs -- so this is the
+    relocation clearing memory, not a truncated load.
+
+    Phase 1 survives this only because it copies **before** `GRAPHIC 1`. Phase 2
+    cannot: its destinations are `$2000-$27FF` and `$2E7C-$3FFF`, which the
+    BASIC text occupies at load time, so its copy must happen *after* the
+    relocation, from a stage the relocation has already wiped. The Phase 2
+    probe reached exactly that wall: `SYS` into a loader of zeroes, `BRK` at
+    `$0E02`.
+
+    Staging below `$4000` does not rescue it. After the probe's text ends at
+    `$26D8` there are 6,439 bytes to `$3FFF` against 6,532 needed for the
+    charset and sprites -- 93 bytes short, and worse as the program grows. For
+    the full game it is hopeless: the C64 source tokenizes to `$1C01-$422F`, so
+    the text alone covers the whole VIC window and the relocation is not
+    optional.
+
+    **Therefore in-PRG staging cannot load this edition's assets.** The layout
+    itself is sound and unchanged -- the window, the pointer numbering, the
+    charset slots all still hold. What has to change is how bytes reach it. See
+    the open decision below.
+17. **BASIC 7 colours run 1-16 where the VIC registers run 0-15.** `SPRITE
+    2,1,0,...` fails with `?ILLEGAL QUANTITY ERROR` because 0 is not a BASIC 7
+    colour. Every colour handed to `SPRITE` is therefore the C64 register value
+    plus one: the C64 title writes `$D027-$D02E` as 1,0,1,6,1,6,7,15, so BASIC 7
+    wants 2,1,2,7,2,7,8,16. Verified by reading the registers back afterwards.
+
+    And the upper nibble of `$D027-$D02E` is unused, reading back as 1s, so
+    `$D027` reads `$F1` for colour 1. Same trap as bit 0 of `$D018`: assert the
+    field, never the byte. Two register-readback conventions, both of which cost
+    a verification cycle to find.
+18. **`SPRITE` does not touch the sprite pointers.** Measured immediately after
+    eight `SPRITE` calls: `$07F8-$07FF` still held 187, 246, 253, 254, 243, 245,
+    195, 244. So the C64 pointer values can be written once and left alone, and
+    BASIC 7's own `$0E00` sprite area is never consulted. That is what makes the
+    un-renumbered payload workable and what frees `$0E00` for other use.
+19. The C64 editor and keyboard constants, measured with the cursor deliberately
     parked on row 8:
 
     | C64 use | C64 address | C128 finding |
@@ -287,6 +334,8 @@ tools/c128-build.py             Build driver; never invokes Blitz!    DONE
 tools/verify-c128-vic.py        Native-C128 checks under x128         DONE
 docs/c128-vic-design.md         This document                         DONE
 src/c128/phase1.bas             Native runtime-model probe             DONE
+src/c128/phase2.bas             VIC asset and title-tableau probe      DONE
+tools/c128-asset.py             Headers and truncates one asset file   DONE
 tools/c128-music.cfg            Player linked into the gateway window  DONE
 tools/c128-rng.cfg              RNG and its table, same window         DONE
 tools/c128-parity.py            Proves the C64 helper blobs unchanged  DONE
@@ -368,7 +417,7 @@ Port only the C64-specific runtime assumptions first:
   low memory on the C128, so the ported helper takes its argument from an
   address inside `$1300-$1BFF`;
 - replace the C64 editor and keyboard constants per the measured table in
-  evidence item 16: drop `648` entirely, map `214` onto `235`, and treat `653`
+  evidence item 19: drop `648` entirely, map `214` onto `235`, and treat `653`
   as an open item rather than a translation;
 - give the title music, RNG and fixed-jiffy wait helper native C128 entry
   points inside the gateway window; and
@@ -405,7 +454,57 @@ What must change: the load address and the `SYS` entry points move out of
 `$4200` into the gateway window, and the SID equates stay as they are because
 the SID is at `$D400` in native mode.
 
-### Phase 2: port VIC assets and flight
+### Phase 2: port VIC assets and flight -- assets and title tableau DONE
+
+The asset *layout* is settled and better than the doc originally assumed. The 61
+distinct sprite slots the game pokes span pointers 187-254, which in VIC bank 0
+resolve to `$2EC0-$3FBF`, inside the `GRAPHIC 1` reserve. A 2 KB title charset at
+`$2000` takes pointers 128-159 and collides with none of them. So:
+
+- **the C64 pointer numbering carries over unchanged**, and an attitude change
+  stays a single pointer `POKE` rather than the 64-byte block copy this document
+  previously budgeted for;
+- **the sprite payload is used un-rebased.** `build/lsprite-shapes.prg` already
+  loads at `$2E7C`, which is its VIC bank 0 home; the `$AE7C` rebase exists only
+  to reach bank 2 on the C64, so the C128 reuses the payload more literally
+  byte-for-byte than the C64's own bank-2 build does;
+- **only one RAM character set is needed.** Flight uses the character ROM at
+  `$1000` (`$D018` `$14`, the C128 default, matching the C64's `$9000` char-ROM
+  shadow in bank 2); only the title needs RAM, at `$2000` (`$D018` `$18`);
+- the payload's last 116 bytes fall in pointer slots 256 and above, which an
+  8-bit pointer cannot reach, so the builder drops them and says so.
+
+### Resolved: assets reach the window from disk
+
+Evidence item 16 forced this. `GRAPHIC 1` clears everything above `$4000`, the
+destinations sit under the load-time BASIC text, and below `$4000` there is not
+enough room to stage them -- 93 bytes short even for the probe, and hopeless for
+the full game whose text alone covers `$1C01-$422F`. In-PRG staging cannot
+deliver these assets.
+
+So the edition loads them the way the C128 was designed to: `GRAPHIC 1` first,
+then one `BLOAD` per region straight to its address in bank 0.
+
+```basic
+graphic1:graphic0
+bload"music",b0,p4864     : rem $1300
+bload"rng",b0,p5376       : rem $1500
+bload"charset",b0,p8192   : rem $2000
+bload"sprites",b0,p11900  : rem $2E7C
+```
+
+Each asset ships as a PRG already headered with its destination, so the `P`
+parameter and the file header agree. `tools/c128-asset.py` stamps the header and
+performs the one truncation the payload needs.
+
+This makes the disk image a **prerequisite**, not packaging polish, and
+"disk format is not a prerequisite for gameplay" is withdrawn as falsified. The
+compensation is that the artifact the definition of done prefers -- a
+self-booting disk -- is now on the critical path rather than deferred behind it.
+An autoboot sector is the remaining piece; `-autostart image.d71:phase2` stands
+in for it during verification.
+
+### Phase 2 bring-up order, once unblocked
 
 Re-use `sprites/lsprite.prg` and `tools/make-shapes.py` output byte-for-byte
 where possible. The allowed changed sprite slots remain exactly the established
@@ -473,9 +572,11 @@ more sprites, bitmap graphics or VDC support are separate proposals.
 - The copy loop is interpreted BASIC and takes a couple of seconds. That is a
   one-time title-screen cost and buys the absence of an unproven loader; revisit
   it only if it lands somewhere the player notices.
-- The initial artifact is a PRG. A PRG cannot self-boot: reaching the title
-  still costs a `RUN`. A `.d71` with a C128 autoboot sector is the only way to
-  get a true boot, and it is the last milestone-1 item, not a prerequisite.
+- The artifact is a `.d71`, built with `c1541`, carrying the BASIC program and
+  one PRG per asset region. This is a prerequisite rather than a final flourish,
+  for the reason given under "Resolved: assets reach the window from disk".
+  A C128 autoboot sector is the one remaining piece; until it lands,
+  `-autostart image.d71:progname` stands in.
 - Never use `make -j` for emulator-driven checks. The Makefile is
   `.NOTPARALLEL`.
 
@@ -538,7 +639,7 @@ The first milestone is complete when all of the following are true:
 | Risk | Required response |
 | --- | --- |
 | BASIC 7 flight is slower than C64 Blitz | Measure motion/timing first. BASIC 7's interpreter loop and its heavier KERNAL interrupt both cost more per statement than BASIC 2, and `SPRITE`/`MOVSPR` shift work from POKEs into the interpreter. Do not alter physics; choose a C128-native compiler or a tightly scoped helper only after an evidence-backed decision. |
-| Attitude changes become 64-byte copies | The C64 build swaps a sprite pointer; `$0E00` holds only eight live shapes, so a shape change is a block copy. Measure it in the flight loop in Phase 2; a pointer-swap scheme inside `$0E00-$0FFF` is the fallback. |
+| ~~Attitude changes become 64-byte copies~~ | Closed. The used slots 187-254 land at `$2EC0-$3FBF` inside the reserve, `SPRITE` does not touch the pointer table, and the payload is used un-rebased, so a shape change stays one `POKE`. |
 | ~~Gateway window is 256 bytes too small~~ | Closed by measurement. The helpers assemble to 2,057 bytes against the window's 2,304; the C64 figure of 2,560 was the declared hole, not its contents. |
 | The 50 Hz interrupt breaks other C64 timing assumptions | `wait` and `step_ticks` are fixed and verified. Audit anything else that counts interrupts or treats a tick as a jiffy before Phase 2, and measure NTSC separately. |
 | `PEEK(653)` reads 255 on the C128, so the alternate fire is stuck on | Open. Do not ship the C128 edition with `653` in the input path; verification row 16a must land first. |
@@ -547,6 +648,7 @@ The first milestone is complete when all of the following are true:
 | C128 keyboard scan interferes with `PEEK(56320)` joystick reads | Add verification check 16 before trusting the joystick path; the C128 scans more key lines than the C64. |
 | C128 character ROM differs from the C64 font used by the title builder | Capture/verify the native VIC charset, then regenerate only the title charset if necessary. Preserve custom title glyph design. |
 | 2 MHz is proposed as a flight optimization | Reject it for this VIC-IIe edition; it disables the visible 40-column display. |
+| Staged data is assumed to survive `GRAPHIC 1` | It does not, above `$4000`. Anything the relocation must not eat has to live below `$4000` or come off disk after the fact. |
 | A `$D018` write is assumed to stick | The editor's interrupt reloads it from `$0A2C`. Write the shadow, and never assert a video register immediately after writing it; wait an interrupt first. |
 | A change also modifies C64 behavior | Stop and separate the code paths. The C64 canonical game has priority. |
 
