@@ -545,7 +545,42 @@ self-booting disk -- is now on the critical path rather than deferred behind it.
 An autoboot sector is the remaining piece; `-autostart image.d71:phase2` stands
 in for it during verification.
 
-### Phase 2b: the flight port -- title renders, flight BLOCKED on MOVSPR
+### Measured: interpreted BASIC 7 is far too slow, and that is the real blocker
+
+The canonical C64 artifact is **compiled** with Blitz!. The C128 port is
+interpreted, and that difference dominates everything else. Measured on the
+ported disk under `x128 +go64`:
+
+- terrain generation draws about **5.6 cells per second** and takes roughly
+  **50 seconds** for a 273-cell field. The compiled C64 build does it in a
+  second or two.
+- flight is reached about 70 seconds after F7.
+
+A micro-benchmark in a program padded to the same length as the port, so the
+line-search cost is realistic, shows where it goes:
+
+| operation | per second | each |
+| --- | --- | --- |
+| empty `FOR` iteration | 472 | 2.1 ms |
+| `POKE` | 90 | 11.1 ms |
+| `PEEK` into a variable | 98 | 10.1 ms |
+| `pk=1504+ii*40` | 73 | 13.7 ms |
+| backward `GOSUB` | 49 | 20.1 ms |
+
+These are ordinary interpreted-CBM-BASIC figures, made worse by BASIC 7 keeping
+every variable in RAM bank 1 behind a bank-switched fetch. There is no defect to
+fix here: the terrain inner loop runs roughly fifteen statements per cell, and
+fifteen statements at these rates *is* 5.6 cells per second.
+
+So the risk row "BASIC 7 flight is slower than C64 Blitz" is now measured rather
+than anticipated, and the decision it defers has to be taken. Note what is
+**not** available: `tools/BLITZ.d64` is a C64 compiler and this document already
+forbids repurposing it, and MOSpeed compiles BASIC V2, which cannot handle the
+`GRAPHIC`, `BLOAD`, `SPRITE`, `MOVSPR`, `BUMP`, `CHAR` and `BANK` statements the
+port depends on. FAST mode is worth at most 2x and only with the screen blanked,
+which the terrain step could use but flight cannot.
+
+### Phase 2b: the flight port -- title renders, flight BLOCKED
 
 `src/c128/lunalight.bas` does not exist and deliberately never will. Keeping a
 hand-edited copy of a 250-line BASIC program beside the original is how a port
@@ -560,7 +595,7 @@ contributor text, the star field, `PRESS F7 TO START`, `$D015` = `$FF`, the
 title character set at `$2000`, the eight C64 sprite pointers, and the C64
 title colours 1,0,1,6,1,6,7,15 read back exactly.
 
-What does not: every sprite is at X=0, because of evidence item 19 -- the C64's
+What does not: flight is unusably slow (see the measurement above), and every sprite is at X=0 because of evidence item 19 -- the C64's
 position `POKE`s are discarded. The title tableau is therefore unpositioned and
 flight cannot be assessed until the positions go through `MOVSPR`. That is the
 next piece of work, and it is the first one in this port that touches gameplay
@@ -701,7 +736,7 @@ The first milestone is complete when all of the following are true:
 
 | Risk | Required response |
 | --- | --- |
-| BASIC 7 flight is slower than C64 Blitz | Measure motion/timing first. BASIC 7's interpreter loop and its heavier KERNAL interrupt both cost more per statement than BASIC 2, and `SPRITE`/`MOVSPR` shift work from POKEs into the interpreter. Do not alter physics; choose a C128-native compiler or a tightly scoped helper only after an evidence-backed decision. |
+| BASIC 7 flight is slower than C64 Blitz | **Measured, and it is decisive**: 90 POKEs and 49 backward GOSUBs per second, terrain generation 50s against the compiled C64's one or two. The canonical C64 build is compiled and the port is interpreted. A playable C128 edition needs either a C128 BASIC compiler or the hot loops in machine code; neither `tools/BLITZ.d64` nor MOSpeed can do it. Decision pending. |
 | ~~Attitude changes become 64-byte copies~~ | Closed. The used slots 187-254 land at `$2EC0-$3FBF` inside the reserve, `SPRITE` does not touch the pointer table, and the payload is used un-rebased, so a shape change stays one `POKE`. |
 | ~~Gateway window is 256 bytes too small~~ | Closed by measurement. The helpers assemble to 2,057 bytes against the window's 2,304; the C64 figure of 2,560 was the declared hole, not its contents. |
 | The 50 Hz interrupt breaks other C64 timing assumptions | `wait` and `step_ticks` are fixed and verified. Audit anything else that counts interrupts or treats a tick as a jiffy before Phase 2, and measure NTSC separately. |

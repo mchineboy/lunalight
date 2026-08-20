@@ -46,6 +46,14 @@ RULES: list[tuple[str, str, str]] = [
         "reloads $D018 from its shadow at $0A2C, so the shadow is the register "
         "that actually selects it",
     ),
+    (
+        "poke53272,20",
+        "poke2604,20:poke53272,20",
+        "flight uses the character ROM, and $14 happens to be the C128's own "
+        "default, so this looked like it needed no change. It does: once the "
+        "title has set the shadow to 24, the editor's interrupt drags $D018 "
+        "back to the title charset and flight renders in the wrong font",
+    ),
     ("poke214,", "poke235,", "the cursor row lives at $EB on the C128, not $D6"),
     (
         "poke679,",
