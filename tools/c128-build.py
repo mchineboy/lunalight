@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Build the native-C128 VIC-IIe artifacts. Never invokes Blitz!.
+
+The Phase 0 package is a pure BASIC 7 program at $1C01: the $1300 machine-code
+gateway is assembled with ca65/ld65 and then embedded as DATA, so VICE can
+autostart the PRG as an ordinary BASIC program with no custom loader. The
+builder rejects overlapping regions and writes a machine-readable layout report
+beside the PRG.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+DATA_MARKER = re.compile(r"^\s*9000\s+rem\b", re.IGNORECASE)
+# Free bank-0 RAM on the C128: no ROM shadows it and BASIC text starts above it.
+FREE_RAM = (0x1300, 0x1BFF)
+# Where the probe leaves its findings for tools/verify-c128-vic.py.
+RESULTS_BLOCK = (0x1B00, 0x1B1F)
+
+
+class BuildError(RuntimeError):
+    pass
+
+
+def run(command: list[str]) -> None:
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise BuildError(
+            f"{command[0]} failed: {' '.join(command)}\n"
+            f"{result.stdout}{result.stderr}"
+        )
+
+
+def assemble(source: Path, config: Path, out_dir: Path, ca65: str, ld65: str) -> Path:
+    obj = out_dir / f"{source.stem}.o"
+    prg = out_dir / f"{source.stem}.prg"
+    run([ca65, "-t", "none", "-o", str(obj), str(source)])
+    run([ld65, "-C", str(config), "-o", str(prg), str(obj)])
+    return prg
+
+
+def load_prg(path: Path) -> tuple[int, bytes]:
+    raw = path.read_bytes()
+    if len(raw) < 3:
+        raise BuildError(f"{path} is too short to be a PRG")
+    return raw[0] | (raw[1] << 8), raw[2:]
+
+
+def data_lines(blob: bytes, first_line: int, step: int, per_line: int) -> list[str]:
+    """Emit the gateway as BASIC DATA: a length, then the bytes."""
+    values = [str(len(blob))] + [str(byte) for byte in blob]
+    lines = []
+    line = first_line
+    for index in range(0, len(values), per_line):
+        lines.append(f"{line} data{','.join(values[index:index + per_line])}")
+        line += step
+    return lines
+
+
+def check_layout(regions: list[dict[str, object]]) -> None:
+    ordered = sorted(regions, key=lambda region: region["start"])
+    for lower, upper in zip(ordered, ordered[1:]):
+        if lower["end"] >= upper["start"]:
+            raise BuildError(
+                f"layout overlap: {lower['name']} "
+                f"${lower['start']:04X}-${lower['end']:04X} meets "
+                f"{upper['name']} ${upper['start']:04X}-${upper['end']:04X}"
+            )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--basic", type=Path, required=True)
+    parser.add_argument("--gateway", type=Path, required=True)
+    parser.add_argument("--gateway-config", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--petcat", default="petcat")
+    parser.add_argument("--ca65", default="ca65")
+    parser.add_argument("--ld65", default="ld65")
+    args = parser.parse_args()
+
+    out_dir = args.out.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    gateway_prg = assemble(
+        args.gateway, args.gateway_config, out_dir, args.ca65, args.ld65
+    )
+    gateway_addr, gateway = load_prg(gateway_prg)
+    gateway_end = gateway_addr + len(gateway) - 1
+    if not (FREE_RAM[0] <= gateway_addr and gateway_end <= FREE_RAM[1]):
+        raise BuildError(
+            f"gateway ${gateway_addr:04X}-${gateway_end:04X} escapes the free "
+            f"bank-0 window ${FREE_RAM[0]:04X}-${FREE_RAM[1]:04X}"
+        )
+
+    source = args.basic.read_text().splitlines()
+    body = [line for line in source if not DATA_MARKER.match(line)]
+    if len(body) == len(source):
+        raise BuildError(f"{args.basic} has no line 9000 DATA marker")
+    body += data_lines(gateway, first_line=9000, step=1, per_line=16)
+
+    spliced = out_dir / f"{args.basic.stem}.spliced.bas"
+    spliced.write_text("\n".join(body) + "\n")
+    run([args.petcat, "-w70", "-o", str(args.out), "--", str(spliced)])
+
+    basic_addr, basic = load_prg(args.out)
+    if basic_addr != 0x1C01:
+        raise BuildError(f"BASIC 7 text must load at $1C01, got ${basic_addr:04X}")
+    basic_end = basic_addr + len(basic) - 1
+
+    regions = [
+        {"name": "gateway", "start": gateway_addr, "end": gateway_end},
+        {"name": "results", "start": RESULTS_BLOCK[0], "end": RESULTS_BLOCK[1]},
+        {"name": "basic-text-at-load", "start": basic_addr, "end": basic_end},
+    ]
+    check_layout(regions)
+
+    # After GRAPHIC 1 the interpreter reserves $2000-$3FFF and lifts the text to
+    # $4001, so the report records both homes: the load-time span above and the
+    # relocated span the running program actually occupies.
+    relocated_end = 0x4001 + len(basic) - 1
+    report = {
+        "prg": str(args.out),
+        "regions": regions,
+        "graphic1": {
+            "bitmap_reserve": {"start": 0x2000, "end": 0x3FFF},
+            "relocated_text": {"start": 0x4001, "end": relocated_end},
+        },
+        "free_ram": {"start": FREE_RAM[0], "end": FREE_RAM[1]},
+        "gateway_entries": {
+            "probe": gateway_addr,
+            "irq_on": gateway_addr + 3,
+            "irq_off": gateway_addr + 6,
+            "results": 0x1340,
+        },
+    }
+    args.report.write_text(json.dumps(report, indent=2) + "\n")
+
+    for region in sorted(regions, key=lambda item: item["start"]):
+        print(
+            f"{region['name']:<20} ${region['start']:04X}-${region['end']:04X} "
+            f"{region['end'] - region['start'] + 1:5d} bytes"
+        )
+    print(
+        f"{'relocated text':<20} $4001-${relocated_end:04X} "
+        f"(after graphic 1; $2000-$3FFF reserved)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BuildError as error:
+        print(f"error: {error}", file=sys.stderr)
+        sys.exit(1)

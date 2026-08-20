@@ -57,6 +57,18 @@ BANK2_CAPACITY_FULL := $(BUILD_DIR)/lunalight-bank2-capacity-full.prg
 BANK2_CAPACITY_REPORT := $(BUILD_DIR)/bank2-capacity.json
 BANK2_RUNTIME_RESERVE ?= 1536
 
+# Native C128 VIC-IIe edition. Separate source, builder and verifier; it shares
+# no address assumptions with the C64 paths above and never invokes Blitz!.
+X128 ?= x128
+C128_DIR := $(SRC_DIR)/c128
+C128_PHASE0_SRC := $(C128_DIR)/phase0.bas
+C128_GATEWAY_SRC := $(C128_DIR)/helper.s
+C128_GATEWAY_CFG := $(TOOLS_DIR)/c128-helper.cfg
+C128_BUILD_DRIVER := $(TOOLS_DIR)/c128-build.py
+C128_VERIFY_DRIVER := $(TOOLS_DIR)/verify-c128-vic.py
+C128_PHASE0_PRG := $(BUILD_DIR)/lunalight-c128-phase0.prg
+C128_PHASE0_REPORT := $(BUILD_DIR)/c128-phase0-layout.json
+
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
 # It compiles the canonical source and reserves the canonical bank-2 asset
 # ranges so patch-assets.py can produce one LOAD",8,1" image.
@@ -123,7 +135,7 @@ GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
 	d64 d64-boot d64-mospeed gif \
 	verify-baseline record-blitz-baseline verify-blitz-gameplay verify-blitz-motion \
 	verify-bank0-motion verify-bank2-motion verify-bank2 verify-bank2-capacity \
-	bank2-capacity
+	bank2-capacity c128-vic run-c128-vic verify-c128-vic
 
 # Every VICE-driven target owns the emulator, its binary monitor port and its
 # screenshots; parallel makes would interleave them.
@@ -450,6 +462,29 @@ bench: $(BLITZ_FULL)
 		> $(BUILD_DIR)/lunalight-blitz-bench.log 2>&1 || true
 	@test -s $(BUILD_DIR)/lunalight-blitz-bench.png || { echo "bench FAILED"; exit 1; }
 	@echo "bench ok: $(BUILD_DIR)/lunalight-blitz-bench.png"
+
+# Phase 0 native-C128 bootstrap: a BASIC 7 program at $$1C01 that relocates its
+# own text with GRAPHIC 1, loads the $$1300 machine-code gateway from DATA and
+# records what it found for the verifier.
+$(C128_PHASE0_PRG) $(C128_PHASE0_REPORT): $(C128_PHASE0_SRC) $(C128_GATEWAY_SRC) \
+		$(C128_GATEWAY_CFG) $(C128_BUILD_DRIVER)
+	@mkdir -p $(BUILD_DIR)
+	$(PYTHON) $(C128_BUILD_DRIVER) \
+		--basic $(C128_PHASE0_SRC) \
+		--gateway $(C128_GATEWAY_SRC) \
+		--gateway-config $(C128_GATEWAY_CFG) \
+		--out $(C128_PHASE0_PRG) \
+		--report $(C128_PHASE0_REPORT) \
+		--petcat $(PETCAT) --ca65 $(CA65) --ld65 $(LD65)
+
+c128-vic: $(C128_PHASE0_PRG)
+
+# Native mode only: +go64 keeps the machine in C128 mode across the reset.
+run-c128-vic: $(C128_PHASE0_PRG)
+	$(X128) -default +go64 +autostart-delay-random -autostart $(C128_PHASE0_PRG)
+
+verify-c128-vic: $(C128_PHASE0_PRG)
+	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE0_PRG) --vice $(X128)
 
 clean:
 	rm -rf $(BUILD_DIR)
