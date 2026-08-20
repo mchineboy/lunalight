@@ -113,6 +113,65 @@ RULES: list[tuple[str, str, str]] = [
 # purpose as the jiffy clock, so they are not listed here.
 C128_RESERVED_VARIABLES = ("ds", "er", "el")
 
+# The flight HUD cannot be positioned with cursor control codes on the C128.
+#
+# The C64 walks the cursor there with {home}, a run of {down} and a run of
+# {rght}. Anchoring every one of the six prints with {home} is not enough:
+# printing t1$ at column 35 fills row 2 through to column 39, which links rows
+# 2 and 3 into one logical line, and {down} on the C128 steps by logical line
+# rather than by physical row. So each {down} count lands a row late, the error
+# compounds down the block, and the readouts march down the screen -- fuel and
+# horz repeating every four rows to row 24, scrolling the terrain away as they
+# go.
+#
+# CHAR writes at an absolute column and row, honours the {rvon}/{rvof} codes
+# already inside t1$/t2$/t3$, and never scrolls; all three were measured before
+# this was written. The positions below are the C64's own, read off
+# build/bank2-flight.png: labels at column 35 on rows 2, 4 and 6, values at
+# column 34 on rows 3, 5 and 7.
+#
+# STR$ formats exactly as PRINT does, leading space on non-negative values
+# included, so the readouts keep their C64 spacing. The single trailing space
+# does what c$ did on the C64: clear one stale digit when a value shrinks.
+# One further rule, and it is the one that actually stopped the displacement: a
+# write that reaches column 39 makes the C128 editor extend that logical line by
+# inserting a physical row, pushing everything below it down one. Measured:
+# terrain extent went 14-24 to 18-24 between the first and second frame, losing
+# the bottom four rows off the screen, and four was exactly the number of HUD
+# writes that ended at column 39 (t1$, t2$, " 1000 " and t3$). It fires once,
+# because later passes write into lines already linked.
+#
+# So every write stops at column 38. Appearance is preserved: the labels keep
+# their four reverse-video characters at columns 35-38 by dropping only the
+# trailing non-reverse space, which fell on column 39 and is a space anyway; the
+# values are padded to a fixed five characters at 34-38, which also does the
+# stale-digit clearing that c$ did on the C64, and does it for every width
+# rather than one character.
+HUD_REWRITES = {
+    "530": 'char0,35,2,"{rvon}vel {rvof}"',
+    "531": 'char0,34,3,left$(str$(int(m2))+"    ",5)',
+    "570": 'char0,35,4,"{rvon}fuel{rvof}"',
+    "571": 'char0,34,5,left$(str$(fe)+"    ",5)',
+    "620": 'char0,35,6,"{rvon}horz{rvof}"',
+    "621": 'char0,34,7,left$(str$(hm)+"    ",5)',
+    # The bottom status bar is the same C64 idiom -- poke the cursor row, PRINT a
+    # newline into row 24, then print the bar. Converting only the readouts left
+    # it in place, and it alone still displaced the terrain once at flight start:
+    # 272 cells down to 121, then stable. CHAR at explicit columns removes the
+    # last editor-mediated write from the flight path.
+    #
+    # Columns match the C64's TAB stops exactly: 0, 17 and 32. The C64 prints a
+    # number with PRINT n; which emits a leading AND a trailing space, whereas
+    # STR$ gives only the leading one -- which is precisely what c$ existed to
+    # rewrite -- so " lems" carries the space that PRINT would have produced,
+    # keeping "4 LEMS" spaced as on the C64.
+    "1500": 'char0,0,24,"{rvon}{lblu}"+left$(bl$,39)',
+    "1510": 'char0,0,24,"{rvon}{lblu} hi"+str$(hs):char0,17,24,'
+            '"{rvon}{lblu}score"+str$(pt):char0,32,24,'
+            '"{rvon}{lblu}"+str$(nm)+" lems"',
+    "1515": 'ifamthenchar0,0,0,"{rvon}{lblu} attract "',
+}
+
 # Inserted after the leading REM. GRAPHIC 1 has to run before anything else
 # because it clears variables, and the BLOADs have to run after it because it
 # zeroes bank 0 above $4000 and because it is what frees $2000-$3FFF for them.
@@ -175,6 +234,13 @@ def main() -> int:
     parser.add_argument(
         "--explain", action="store_true", help="print each rule and its hit count"
     )
+    parser.add_argument(
+        "--instrument",
+        action="store_true",
+        help="add a frame counter at $1784 to the flight loop, for measuring "
+        "frames per second. Measurement only: it costs about one statement per "
+        "frame and must never be in a shipped build.",
+    )
     args = parser.parse_args()
 
     text = args.source.read_text()
@@ -187,6 +253,31 @@ def main() -> int:
         text = text.replace(needle, replacement)
         if args.explain:
             print(f"  {hits} x {needle!r}\n      -> {replacement!r}\n      {why}")
+
+    if args.instrument:
+        # Line 160 is the flight loop head and `goto160` is its only back edge,
+        # so one increment here counts exactly one frame. $1784 is free space in
+        # the RNG scratch region, above the code and clear of the wait argument.
+        needle = "160 getz$:"
+        if needle not in text:
+            failures.append("cannot instrument: no '160 getz$:' loop head")
+        text = text.replace(
+            needle, "160 poke6020,(peek(6020)+1)and255:getz$:", 1
+        )
+
+    rewritten, seen = [], set()
+    for line in text.splitlines():
+        number = line.strip().split(" ")[0] if line.strip() else ""
+        body = HUD_REWRITES.get(number)
+        if body is not None:
+            indent = line[: len(line) - len(line.lstrip())]
+            line = f"{indent}{number} {body}"
+            seen.add(number)
+        rewritten.append(line)
+    missing = set(HUD_REWRITES) - seen
+    if missing:
+        failures.append(f"HUD lines not found in the source: {sorted(missing)}")
+    text = "\n".join(rewritten)
 
     lines = [rebase_screen(line) for line in text.splitlines()]
 

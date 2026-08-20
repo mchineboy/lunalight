@@ -74,7 +74,7 @@ player owns.
 
 ## Evidence gathered before implementation
 
-Items 1-5 were the pre-Phase-0 desk analysis. Items 6-21 are measured, and
+Items 1-5 were the pre-Phase-0 desk analysis. Items 6-23 are measured, and
 `make verify-c128-vic` re-measures them on every change.
 
 1. `petcat -w70` tokenizes the present BASIC text as C128 BASIC 7.0 at `$1C01`
@@ -256,7 +256,73 @@ Items 1-5 were the pre-Phase-0 desk analysis. Items 6-21 are measured, and
     -- raised only when that line happens to execute, which is why it surfaced
     as a crash out of attract mode rather than at load. `TI` is reserved on both
     machines and the source uses it deliberately as the jiffy clock, so it stays.
-21. The C64 editor and keyboard constants, measured with the cursor deliberately
+21. **`{down}` steps by logical line on the C128, so the flight HUD cannot be
+    positioned with cursor control codes at all.** The C64 walks the cursor to
+    each readout with `{home}`, a run of `{down}` and a run of `{rght}`. That
+    does not survive the port, and anchoring every print with `{home}` is not
+    enough to save it: `t1$` prints at column 35 and fills row 2 through column
+    39, which links rows 2 and 3 into one logical line, so the next `{down}`
+    count lands a row late and the error compounds down the block.
+
+    Measured, with all six prints correctly anchored in the generated source:
+
+    ```text
+     2|vel#     3|30
+     4|fuel     5|1000     6|horz     7|-20
+     8|fuel     9|1000    10|horz    11|-20
+    12|fuel    13|1000    14|horz    15|-20   ... repeating to row 24
+    ```
+
+    `vel` is right because it is the first print, before any drift. Everything
+    after it marches down four rows per pass, reaches the last row, and scrolls
+    the screen every frame -- which is what carried the terrain off the top and
+    made both reported symptoms one defect.
+
+    The fix is `CHAR col,row`, which writes absolutely, honours the
+    `{rvon}`/`{rvof}` codes already inside `t1$`/`t2$`/`t3$`, and never scrolls;
+    all three were measured before relying on them. `STR$` formats exactly as
+    `PRINT` does, leading space on non-negatives included, so the readouts keep
+    their C64 spacing. It also removed six 40-character control-code strings
+    from the per-frame path and took the frame rate from 1.02 to 1.36 fps.
+
+    The general lesson, and the third instance of it in this port: a C64 idiom
+    that walks the editor's cursor relatively is not portable to the C128.
+    Position absolutely or not at all.
+
+    `CHAR` alone was not the end of it, though. See the next item.
+22. **A screen write that reaches column 39 makes the C128 editor insert a
+    physical row**, pushing everything below it down one. This is why the HUD
+    displaced the terrain even after every readout was converted to absolute
+    `CHAR` writes.
+
+    Measured. Terrain extent and cell count, per flight frame:
+
+    | | before | after |
+    | --- | --- | --- |
+    | frame 1 | rows 14-24, 218 cells | rows 13-24, 260 cells |
+    | frame 2 | rows 18-24, **101 cells** | rows 13-24, 260 cells |
+    | frames 3-16 | 101, stable | 260, stable |
+
+    The extent moving 14-24 to 18-24 with the bottom rows lost is content going
+    **down**, not a scroll going up -- and four rows was exactly the number of
+    HUD writes that ended on column 39: `t1$`, `t2$`, `t3$` and the six-character
+    fuel value at column 34. It fires once, because later passes write into lines
+    that are already linked, which is why the display then looked stable at the
+    wrong offset.
+
+    The fix is to keep every write inside columns 0-38, at no cost to
+    appearance. The labels keep their four reverse-video characters at 35-38 by
+    dropping only the trailing non-reverse space that fell on column 39 and was
+    a space regardless. The values are padded to a fixed five characters at
+    34-38 with `LEFT$(STR$(x)+"    ",5)`, which also generalises what `c$` did on
+    the C64: `PRINT n;` emits a leading *and* a trailing space where `STR$` emits
+    only the leading one, and rewriting that trailing space is precisely what
+    `c$` was for. Fixed-width padding clears a stale digit at every width rather
+    than one.
+
+    Frame rate went 1.02 -> 1.36 -> 1.59 fps across the two changes, since both
+    removed work from the per-frame path.
+23. The C64 editor and keyboard constants, measured with the cursor deliberately
     parked on row 8:
 
     | C64 use | C64 address | C128 finding |
@@ -458,7 +524,7 @@ Port only the C64-specific runtime assumptions first:
   low memory on the C128, so the ported helper takes its argument from an
   address inside `$1300-$1BFF`;
 - replace the C64 editor and keyboard constants per the measured table in
-  evidence item 21: drop `648` entirely, map `214` onto `235`, and treat `653`
+  evidence item 23: drop `648` entirely, map `214` onto `235`, and treat `653`
   as an open item rather than a translation;
 - give the title music, RNG and fixed-jiffy wait helper native C128 entry
   points inside the gateway window; and
@@ -552,9 +618,11 @@ interpreted, and that difference dominates everything else. Measured on the
 ported disk under `x128 +go64`:
 
 - terrain generation draws about **5.6 cells per second** and takes roughly
-  **50 seconds** for a 273-cell field. The compiled C64 build does it in a
-  second or two.
-- flight is reached about 70 seconds after F7.
+  **50 seconds**. The compiled C64 build does it in a second or two.
+- flight is reached about 65 seconds after F7.
+- **the flight loop itself runs at 1.59 frames per second**, about 630 ms per
+  frame, measured with a one-statement frame counter at `$1784`. That is the
+  number the speed decision turns on.
 
 A micro-benchmark in a program padded to the same length as the port, so the
 line-search cost is realistic, shows where it goes:
@@ -747,6 +815,8 @@ The first milestone is complete when all of the following are true:
 | C128 character ROM differs from the C64 font used by the title builder | Capture/verify the native VIC charset, then regenerate only the title charset if necessary. Preserve custom title glyph design. |
 | 2 MHz is proposed as a flight optimization | Reject it for this VIC-IIe edition; it disables the visible 40-column display. |
 | Staged data is assumed to survive `GRAPHIC 1` | It does not, above `$4000`. Anything the relocation must not eat has to live below `$4000` or come off disk after the fact. |
+| A screen write is assumed not to disturb its neighbours | A write reaching column 39 inserts a physical row and pushes everything below down. Keep every write inside columns 0-38. |
+| A C64 cursor-walking idiom is assumed to port | It does not: `{down}` steps by logical line, so relative positioning drifts and eventually scrolls. Use `CHAR` for anything positioned. |
 | A VIC register write is assumed to land | Sprite positions do not land at all; `$D018` lands and is then overwritten. Neither can be asserted by reading straight back, and neither is safe to POKE. Check the register through VICE's `io` bank, not the CPU bank, or the read returns character ROM. |
 | A `$D018` write is assumed to stick | The editor's interrupt reloads it from `$0A2C`. Write the shadow, and never assert a video register immediately after writing it; wait an interrupt first. |
 | A change also modifies C64 behavior | Stop and separate the code paths. The C64 canonical game has priority. |
