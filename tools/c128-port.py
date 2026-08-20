@@ -113,59 +113,58 @@ RULES: list[tuple[str, str, str]] = [
 # purpose as the jiffy clock, so they are not listed here.
 C128_RESERVED_VARIABLES = ("ds", "er", "el")
 
-# The flight HUD cannot be positioned with cursor control codes on the C128.
+# The flight HUD is written with POKEs, not with PRINT and not with CHAR.
 #
-# The C64 walks the cursor there with {home}, a run of {down} and a run of
-# {rght}. Anchoring every one of the six prints with {home} is not enough:
-# printing t1$ at column 35 fills row 2 through to column 39, which links rows
-# 2 and 3 into one logical line, and {down} on the C128 steps by logical line
-# rather than by physical row. So each {down} count lands a row late, the error
-# compounds down the block, and the readouts march down the screen -- fuel and
-# horz repeating every four rows to row 24, scrolling the terrain away as they
-# go.
+# Three measurements forced this, in order:
 #
-# CHAR writes at an absolute column and row, honours the {rvon}/{rvof} codes
-# already inside t1$/t2$/t3$, and never scrolls; all three were measured before
-# this was written. The positions below are the C64's own, read off
-# build/bank2-flight.png: labels at column 35 on rows 2, 4 and 6, values at
-# column 34 on rows 3, 5 and 7.
+#   PRINT with cursor codes: {down} steps by logical line on the C128, so the
+#   readouts drifted four rows per pass down to row 24 and scrolled the terrain
+#   away. Anchoring every print with {home} did not help, because the anchor was
+#   never wrong -- the steps were.
 #
-# STR$ formats exactly as PRINT does, leading space on non-negative values
-# included, so the readouts keep their C64 spacing. The single trailing space
-# does what c$ did on the C64: clear one stale digit when a value shrinks.
-# One further rule, and it is the one that actually stopped the displacement: a
-# write that reaches column 39 makes the C128 editor extend that logical line by
-# inserting a physical row, pushing everything below it down one. Measured:
-# terrain extent went 14-24 to 18-24 between the first and second frame, losing
-# the bottom four rows off the screen, and four was exactly the number of HUD
-# writes that ended at column 39 (t1$, t2$, " 1000 " and t3$). It fires once,
-# because later passes write into lines already linked.
+#   CHAR at absolute positions: fixed the drift, but a write reaching column 39
+#   makes the editor insert a physical row and push everything below it down.
+#   Terrain went from rows 14-24 to 18-24 in one frame and sat there.
 #
-# So every write stops at column 38. Appearance is preserved: the labels keep
-# their four reverse-video characters at columns 35-38 by dropping only the
-# trailing non-reverse space, which fell on column 39 and is a space anyway; the
-# values are padded to a fixed five characters at 34-38, which also does the
-# stale-digit clearing that c$ did on the C64, and does it for every width
-# rather than one character.
+#   CHAR kept inside column 38: correct at last, and catastrophically slow.
+#   Native compiled flight ran 0.52 fps with these six readouts and 9.98 fps
+#   with them stubbed out, so they were costing about 95% of the frame. The
+#   cause is nine string allocations per frame -- LEFT$(STR$(x)+"    ",5) three
+#   times over -- and compiled strings live behind bank-1 descriptors.
+#
+# POKEs settle all three at once. They cannot drift, they cannot make the editor
+# insert anything, and they allocate nothing. It is also what the terrain and pad
+# routines have always done, so the flight loop now touches the editor nowhere.
+#
+# Digits are extracted arithmetically rather than through STR$, right-aligned in
+# a five-cell field, which also generalises the stale-digit clearing that c$ did
+# on the C64. The labels are static, so they are drawn once per round instead of
+# rebuilt every frame.
+#
+# Colour: the C64 selects green/yellow/red by PRINTing a colour code before each
+# readout. Those become a colour number in cc, written to colour RAM alongside.
 HUD_REWRITES = {
-    "530": 'char0,35,2,"{rvon}vel {rvof}"',
-    "531": 'char0,34,3,left$(str$(int(m2))+"    ",5)',
-    "570": 'char0,35,4,"{rvon}fuel{rvof}"',
-    "571": 'char0,34,5,left$(str$(fe)+"    ",5)',
-    "620": 'char0,35,6,"{rvon}horz{rvof}"',
-    "621": 'char0,34,7,left$(str$(hm)+"    ",5)',
-    # The bottom status bar is the same C64 idiom -- poke the cursor row, PRINT a
-    # newline into row 24, then print the bar. Converting only the readouts left
-    # it in place, and it alone still displaced the terrain once at flight start:
-    # 272 cells down to 121, then stable. CHAR at explicit columns removes the
-    # last editor-mediated write from the flight path.
-    #
-    # Columns match the C64's TAB stops exactly: 0, 17 and 32. The C64 prints a
-    # number with PRINT n; which emits a leading AND a trailing space, whereas
-    # STR$ gives only the leading one -- which is precisely what c$ existed to
-    # rewrite -- so " lems" carries the space that PRINT would have produced,
-    # keeping "4 LEMS" spaced as on the C64.
-    "1500": 'char0,0,24,"{rvon}{lblu}"+left$(bl$,39)',
+    # colour selection: PRINT of a colour code becomes a colour number
+    "500": "ifm2<3thencc=5:goto530",
+    "510": "cc=7",
+    "515": "ifm2>5thencc=2",
+    "540": "iffe>399thencc=5:goto570",
+    "550": "iffe<100thencc=2:goto570",
+    "560": "cc=7",
+    "600": "ifhm=.thencc=5:goto620",
+    "605": "ifhm>-3thenifhm<3thencc=7:goto620",
+    "610": "cc=2",
+    # readouts: label offset then value. rows 2/4/6 label, 3/5/7 value,
+    # columns 35 and 34, exactly where the C64 puts them.
+    "530": "la=115",
+    "531": "xv=int(m2):sa=154:gosub2150",
+    "570": "la=195",
+    "571": "xv=fe:sa=234:gosub2150",
+    "620": "la=275",
+    "621": "xv=hm:sa=314:gosub2150",
+    # the status bar is drawn once per round, so CHAR is affordable there, and
+    # it seeds the static labels at the same time
+    "1500": 'char0,0,24,"{rvon}{lblu}"+left$(bl$,39):gosub2160',
     "1510": 'char0,0,24,"{rvon}{lblu} hi"+str$(hs):char0,17,24,'
             '"{rvon}{lblu}score"+str$(pt):char0,32,24,'
             '"{rvon}{lblu}"+str$(nm)+" lems"',
@@ -186,6 +185,24 @@ PROLOGUE = """\
 
 # The C64 KERNAL builds SHFLAG at 653 by scanning the keyboard matrix; the C128
 # keeps no equivalent the game can read, so the game does the same scan itself.
+HUD_SUB = """\
+ 2150 rem hud value: xv right-aligned in five cells at screen offset sa, with
+ 2151 rem the four label cells at la recoloured to cc. pokes only, so nothing
+ 2152 rem here can drift, scroll, insert a row or allocate a string.
+ 2153 vv=abs(int(xv)):lp=4
+ 2154 forii=4to.step-1
+ 2155 dd=32:ifii=4orvv>.thendd=48+vv-int(vv/10)*10:vv=int(vv/10):lp=ii
+ 2156 poke1024+sa+ii,dd:poke55296+sa+ii,cc:nextii
+ 2157 ifxv<.andlp>.thenpoke1024+sa+lp-1,45:poke55296+sa+lp-1,cc
+ 2158 forii=.to3:poke55296+la+ii,cc:nextii
+ 2159 return
+ 2160 rem the three static labels, reverse video, drawn once per round
+ 2161 poke1139,150:poke1140,133:poke1141,140:poke1142,160
+ 2162 poke1219,134:poke1220,149:poke1221,133:poke1222,140
+ 2163 poke1299,136:poke1300,143:poke1301,146:poke1302,154
+ 2164 return
+"""
+
 MODIFIER_SUB = """\
  2140 rem c128 stand-in for peek(653): read the modifier rows out of the matrix
  2141 rem the way the kernal does, because 653 is not a shift flag here.
@@ -235,6 +252,13 @@ def main() -> int:
         "--explain", action="store_true", help="print each rule and its hit count"
     )
     parser.add_argument(
+        "--no-hud",
+        action="store_true",
+        help="stub out the six flight HUD readouts. Measurement only: it "
+        "isolates how much of the flight frame time the HUD costs, so a "
+        "rewrite can be justified before it is written.",
+    )
+    parser.add_argument(
         "--instrument",
         action="store_true",
         help="add a frame counter at $1784 to the flight loop, for measuring "
@@ -265,16 +289,24 @@ def main() -> int:
             needle, "160 poke6020,(peek(6020)+1)and255:getz$:", 1
         )
 
+    hud = dict(HUD_REWRITES)
+    if args.no_hud:
+        # Keep the colour-selection lines; blank only the six writes, so the
+        # control flow and the arithmetic feeding them are untouched and the
+        # difference measured is the display cost alone.
+        for number in ("531", "571", "621"):
+            hud[number] = "rem hud stubbed for measurement"
+
     rewritten, seen = [], set()
     for line in text.splitlines():
         number = line.strip().split(" ")[0] if line.strip() else ""
-        body = HUD_REWRITES.get(number)
+        body = hud.get(number)
         if body is not None:
             indent = line[: len(line) - len(line.lstrip())]
             line = f"{indent}{number} {body}"
             seen.add(number)
         rewritten.append(line)
-    missing = set(HUD_REWRITES) - seen
+    missing = set(hud) - seen
     if missing:
         failures.append(f"HUD lines not found in the source: {sorted(missing)}")
     text = "\n".join(rewritten)
@@ -287,6 +319,7 @@ def main() -> int:
     else:
         lines[marker + 1 : marker + 1] = PROLOGUE.rstrip("\n").split("\n")
     lines += MODIFIER_SUB.rstrip("\n").split("\n")
+    lines += HUD_SUB.rstrip("\n").split("\n")
 
     ported = "\n".join(lines) + "\n"
     for pattern, description in FORBIDDEN:
