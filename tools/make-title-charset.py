@@ -87,15 +87,35 @@ GLYPHS = {
 
 
 def chargen_path() -> Path:
-    candidates = []
+    """Locate the C64 chargen ROM image shipped with VICE.
+
+    Distro packages, Homebrew and the CI job that restores the ROMs from the
+    upstream tarball into ``$XDG_DATA_HOME/vice`` all place the file somewhere
+    different, so search the usual data roots instead of a fixed list.
+    """
+    candidates: list[Path] = []
     if configured := os.environ.get("C64_CHARGEN"):
         candidates.append(Path(configured))
-    candidates.extend([
-        Path("/opt/homebrew/share/vice/C64/chargen-901225-01.bin"),
-        Path("/opt/homebrew/Cellar/vice/3.10/share/vice/C64/chargen-901225-01.bin"),
-        Path("/usr/share/vice/C64/chargen-901225-01.bin"),
-        Path("/usr/share/games/vice/C64/chargen-901225-01.bin"),
+
+    roots: list[Path] = []
+    if vice_data := os.environ.get("VICE_DATA_DIR"):
+        roots.append(Path(vice_data))
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    roots.extend([
+        Path(data_home) / "vice",
+        Path("/opt/homebrew/share/vice"),
+        Path("/usr/local/share/vice"),
+        Path("/usr/share/vice"),
+        Path("/usr/share/games/vice"),
+        Path("/usr/lib/vice"),
     ])
+    for root in roots:
+        candidates.append(root / "C64" / "chargen-901225-01.bin")
+        candidates.append(root / "C64" / "chargen")
+
+    for cellar in (Path("/opt/homebrew/Cellar/vice"), Path("/usr/local/Cellar/vice")):
+        candidates.extend(sorted(cellar.glob("*/share/vice/C64/chargen*")))
+
     for candidate in candidates:
         if candidate.is_file() and candidate.stat().st_size >= CHARSET_BYTES:
             return candidate
