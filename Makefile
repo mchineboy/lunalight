@@ -68,6 +68,16 @@ C128_BUILD_DRIVER := $(TOOLS_DIR)/c128-build.py
 C128_VERIFY_DRIVER := $(TOOLS_DIR)/verify-c128-vic.py
 C128_PHASE0_PRG := $(BUILD_DIR)/lunalight-c128-phase0.prg
 C128_PHASE0_REPORT := $(BUILD_DIR)/c128-phase0-layout.json
+# Phase 1 shares src/music.s and src/rng.s with the C64 build; the C128 homes
+# and the re-homed wait argument are assembly-time defines, so the two editions
+# cannot drift. c128-parity proves the C64 blobs stay byte-identical.
+C128_PHASE1_SRC := $(C128_DIR)/phase1.bas
+C128_MUSIC_CFG := $(TOOLS_DIR)/c128-music.cfg
+C128_RNG_CFG := $(TOOLS_DIR)/c128-rng.cfg
+C128_PARITY_DRIVER := $(TOOLS_DIR)/c128-parity.py
+C128_PHASE1_PRG := $(BUILD_DIR)/lunalight-c128-phase1.prg
+C128_PHASE1_REPORT := $(BUILD_DIR)/c128-phase1-layout.json
+C128_STAGE := 0x4000
 
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
 # It compiles the canonical source and reserves the canonical bank-2 asset
@@ -135,7 +145,8 @@ GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
 	d64 d64-boot d64-mospeed gif \
 	verify-baseline record-blitz-baseline verify-blitz-gameplay verify-blitz-motion \
 	verify-bank0-motion verify-bank2-motion verify-bank2 verify-bank2-capacity \
-	bank2-capacity c128-vic run-c128-vic verify-c128-vic
+	bank2-capacity c128-vic run-c128-vic verify-c128-vic \
+	verify-c128-phase0 verify-c128-phase1 c128-parity
 
 # Every VICE-driven target owns the emulator, its binary monitor port and its
 # screenshots; parallel makes would interleave them.
@@ -477,14 +488,40 @@ $(C128_PHASE0_PRG) $(C128_PHASE0_REPORT): $(C128_PHASE0_SRC) $(C128_GATEWAY_SRC)
 		--report $(C128_PHASE0_REPORT) \
 		--petcat $(PETCAT) --ca65 $(CA65) --ld65 $(LD65)
 
-c128-vic: $(C128_PHASE0_PRG)
+$(C128_PHASE1_PRG) $(C128_PHASE1_REPORT): $(C128_PHASE1_SRC) $(SRC_DIR)/music.s \
+		$(SRC_DIR)/rng.s $(C128_MUSIC_CFG) $(C128_RNG_CFG) $(C128_BUILD_DRIVER)
+	@mkdir -p $(BUILD_DIR)
+	$(PYTHON) $(C128_BUILD_DRIVER) \
+		--basic $(C128_PHASE1_SRC) \
+		--blob '0x1300:$(SRC_DIR)/music.s:$(C128_MUSIC_CFG):LOAD_ADDR=$$1300:STEP_TICKS=18:LOOP_JIFFY_NUM=6:LOOP_JIFFY_DEN=5' \
+		--blob '0x1500:$(SRC_DIR)/rng.s:$(C128_RNG_CFG):C128=1:LOAD_ADDR=$$1500:WAITJ=$$1780' \
+		--stage $(C128_STAGE) \
+		--out $(C128_PHASE1_PRG) \
+		--report $(C128_PHASE1_REPORT) \
+		--petcat $(PETCAT) --ca65 $(CA65) --ld65 $(LD65)
+
+c128-vic: $(C128_PHASE0_PRG) $(C128_PHASE1_PRG)
 
 # Native mode only: +go64 keeps the machine in C128 mode across the reset.
 run-c128-vic: $(C128_PHASE0_PRG)
 	$(X128) -default +go64 +autostart-delay-random -autostart $(C128_PHASE0_PRG)
 
-verify-c128-vic: $(C128_PHASE0_PRG)
-	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE0_PRG) --vice $(X128)
+verify-c128-vic: c128-parity verify-c128-phase0 verify-c128-phase1
+
+verify-c128-phase0: $(C128_PHASE0_PRG)
+	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE0_PRG) --phase 0 \
+		--vice $(X128) --log $(BUILD_DIR)/verify-c128-phase0.log
+
+verify-c128-phase1: $(C128_PHASE1_PRG)
+	$(PYTHON) $(C128_VERIFY_DRIVER) --prg $(C128_PHASE1_PRG) --phase 1 \
+		--timeout 240 --vice $(X128) --log $(BUILD_DIR)/verify-c128-phase1.log
+
+# The C128 edition reuses src/music.s and src/rng.s behind assembly-time
+# defines. This proves the canonical C64 blobs are unaffected by that reuse.
+c128-parity: $(MUSIC_PRG) $(RNG_PRG) $(C128_PARITY_DRIVER)
+	$(PYTHON) $(C128_PARITY_DRIVER) --music $(MUSIC_PRG) --rng $(RNG_PRG) \
+		--music-config $(MUSIC_CFG) --rng-config $(RNG_CFG) \
+		--ca65 $(CA65) --ld65 $(LD65)
 
 clean:
 	rm -rf $(BUILD_DIR)

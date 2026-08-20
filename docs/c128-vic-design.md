@@ -74,7 +74,7 @@ player owns.
 
 ## Evidence gathered before implementation
 
-Items 1-5 were the pre-Phase-0 desk analysis. Items 6-13 are measured, and
+Items 1-5 were the pre-Phase-0 desk analysis. Items 6-16 are measured, and
 `make verify-c128-vic` re-measures them on every change.
 
 1. `petcat -w70` tokenizes the present BASIC text as C128 BASIC 7.0 at `$1C01`
@@ -130,6 +130,63 @@ Items 1-5 were the pre-Phase-0 desk analysis. Items 6-13 are measured, and
     probe writes a lit cell with `CHAR 0,10,20`, clears the stale latch, moves a
     solid sprite onto it and reads `BUMP(2)` = `$01`. Polled collision is proven
     rather than assumed, so the C64 landing/crash structure transfers.
+14. **The C128's KERNAL interrupt runs at 50 Hz on PAL while the jiffy clock is
+    still stepped to 60 Hz nominal.** Measured: `SLEEP 1` advances `TI` by 61 and
+    `$A2` by 63, so the clock is ~60 Hz and `$A2` is its low byte; but the RNG's
+    change-counting wait came back 6/5 too long at every count (60 requested ->
+    72 elapsed, 15 -> 18, unchanged with sprites active). One interrupt in six
+    advances the clock by two, so counting changes counts five where six
+    elapsed. Dividing gives the interrupt rate directly: 60x60/72 = 50.0 and
+    60x15/18 = 50.0.
+
+    This is the single most consequential difference found so far, because the
+    C64 helpers assume a ~60 Hz CIA-driven interrupt on both PAL and NTSC. Two
+    things had to change, both behind defines:
+
+    - `wait` compares against a target instead of counting changes, which is
+      exact whatever the step size;
+    - the player's `step_ticks` drops from 22 to 18, because a tick is one
+      interrupt: 18/50 = 0.360 s against the C64's 22/60 = 0.367 s.
+
+    The published loop length needed a unit fix as well. `src/lunalight.bas:135`
+    compares it against `TI`, so it must be in jiffies, and ticks are only
+    jiffies when the interrupt runs at the jiffy rate. It is now
+    `sequence_length * step_ticks * LOOP_JIFFY_NUM / LOOP_JIFFY_DEN`: 1,056 on
+    the C64 (48 x 22 x 1/1), 1,036 on the C128 (48 x 18 x 6/5).
+
+    Measured on PAL `x128` only. NTSC needs its own measurement before the
+    edition claims to run there.
+15. **The C128 editor's interrupt reloads `$D018` from a shadow at `$0A2C`, so
+    `POKE 53272` alone does not switch character sets.** Found by accident: two
+    consecutive Phase 1 runs disagreed, one reading back the poked charset
+    fields and the next reading `$15`, which is the shadow's default `$14` with
+    the unused bit 0 set. The register write wins only until the next interrupt.
+    Write the shadow at `2604` as well, and verify the selection a full second
+    later rather than immediately, or the test measures a race instead of the
+    mechanism. This is not cosmetic: the title/flight charset switch is a Phase 1
+    deliverable and would have worked intermittently.
+
+    Related, and worth stating once: bit 0 of `$D018` is unused on the VIC-IIe
+    and reads back as 1, so a `POKE` of `$18` reads as `$19`. Assert the screen
+    and charset fields, never the whole byte.
+16. The C64 editor and keyboard constants, measured with the cursor deliberately
+    parked on row 8:
+
+    | C64 use | C64 address | C128 finding |
+    | --- | --- | --- |
+    | cursor row | `214` / `$D6` | reads 0; the row is at `235` / `$EB` |
+    | screen page | `648` | reads 0; carries nothing |
+    | screen/charset | -- | `2604` / `$0A2C` holds a `$D018`-format value (`$14`), not a page |
+    | shift/ctrl/CBM flag | `653` | reads **255** with no key held, so it is not a shift flag |
+
+    `648` needs no replacement: the screen stays at the C128 default `$0400`, so
+    `POKE 648,132` simply has no purpose in this layout. `214` maps cleanly onto
+    `235`. `653` is the one that does not map, and it is load-bearing:
+    `src/lunalight.bas:31` and `:241` use `PEEK(653)` as an alternate fire and
+    an any-key wake, so on the C128 both would read as permanently pressed.
+    Finding its replacement needs a probe that can hold a modifier key down,
+    which the binary monitor's keyboard-buffer injection cannot do. Open item,
+    tracked as verification row 16a.
 
 Useful external references:
 
@@ -176,11 +233,20 @@ inside the `GRAPHIC 1` reserve, which is why the reserve is taken even though
 this edition draws no bitmap: `GRAPHIC 1:GRAPHIC 0` claims `$2000-$3FFF` and
 returns to 40-column text in one statement.
 
-The 2,304 bytes of gateway RAM are 256 bytes short of the C64's
-`$4200-$4BFF` hole. The ported music player, RNG and jiffy-wait helper must fit
-in `$1300-$1BFF` together, or the RNG's 1 KB table must move to RAM bank 1 and
-be read through the `$FF00` window. Measure the assembled sizes before
-choosing; do not assume the C64 layout transfers.
+The window is 2,304 bytes against the C64 hole's declared 2,560. Measured, the
+helpers need 2,057 and fit with 247 bytes to spare, because the C64 figure
+counted the declared hole rather than its contents:
+
+```text
+$1300-$14EB  title player           492 bytes  (unchanged from the C64 blob)
+$1500-$1735  RNG code               566 bytes  (541 + 25 for the C128 guard)
+$1736-$177F  probe results          74 bytes   (free; zero-filled at load)
+$1780        wait argument          1 byte     (was $02A7 on the C64)
+$1800-$1BFF  RNG table            1,024 bytes  (page-aligned)
+```
+
+So no part of the payload has to move to RAM bank 1. That option stays open for
+Phase 3 if the table's kilobyte is later wanted for something else.
 
 ## Non-negotiable gameplay invariants
 
@@ -220,12 +286,30 @@ tools/c128-helper.cfg           ld65 config for the gateway           DONE
 tools/c128-build.py             Build driver; never invokes Blitz!    DONE
 tools/verify-c128-vic.py        Native-C128 checks under x128         DONE
 docs/c128-vic-design.md         This document                         DONE
+src/c128/phase1.bas             Native runtime-model probe             DONE
+tools/c128-music.cfg            Player linked into the gateway window  DONE
+tools/c128-rng.cfg              RNG and its table, same window         DONE
+tools/c128-parity.py            Proves the C64 helper blobs unchanged  DONE
 src/c128/lunalight.bas          Native BASIC 7 gameplay/control source
-src/c128/music.s                C128 port of the title player
-src/c128/rng.s                  C128 port of the RNG/wait helper
-src/c128/loader.s              Loader for the real helper blobs, once DATA
-                               embedding stops being big enough
 ```
+
+There is deliberately no `src/c128/music.s` or `src/c128/rng.s`. The two
+editions **share** `src/music.s` and `src/rng.s` and differ only by
+assembly-time defines:
+
+```text
+C64    ca65 src/music.s                              -> $4200
+C128   ca65 -D LOAD_ADDR=$1300 src/music.s           -> $1300
+C64    ca65 src/rng.s                                -> $4400, table $4800
+C128   ca65 -D C128=1 -D LOAD_ADDR=$1500 \
+            -D WAITJ=$1780 src/rng.s                 -> $1500, table $1800
+```
+
+A fork would let the title theme and the PRNG drift apart silently, which is
+exactly what the identity invariants forbid. The cost is C128 conditionals
+inside files the canonical C64 build depends on, so `make c128-parity` re-links
+both helpers with no defines at all and requires the result to be byte-identical
+to the packaged C64 blobs. It runs as the first step of `make verify-c128-vic`.
 
 C128 artifacts are distinguishable:
 
@@ -263,7 +347,13 @@ Phase 0 also proved two things beyond its original brief, both of which change
 later phases: the `GRAPHIC 1` text relocation survives a running program, and
 `MOVSPR` handles the X MSB.
 
-### Phase 1: establish the native source/runtime model
+### Phase 1: establish the native source/runtime model -- COMPLETE except 653
+
+`make c128-vic && make verify-c128-phase1` builds and verifies
+`build/lunalight-c128-phase1.prg`. The ported player and RNG live in the gateway
+window, the wait argument is re-homed, the charset slots work, and the player
+coexists with `BUMP(2)` and `MOVSPR`. The one item not closed is the `653`
+replacement, for the reason given in evidence item 15.
 
 Start with BASIC 7 because it preserves the original float expressions and
 makes semantic comparison practical. A native BASIC compiler may be evaluated,
@@ -277,14 +367,14 @@ Port only the C64-specific runtime assumptions first:
   `POKE 679,n` with `SYS 17420` to select a sound effect; `$02A7` is not free
   low memory on the C128, so the ported helper takes its argument from an
   address inside `$1300-$1BFF`;
-- replace/encapsulate direct C64 editor/screen cursor locations (`648`, `214`)
-  and keyboard state locations (`653`) after confirming their C128 meanings;
-  `POKE 648,132` in particular has no purpose in this layout, because the
-  screen stays at the C128 default `$0400`;
+- replace the C64 editor and keyboard constants per the measured table in
+  evidence item 16: drop `648` entirely, map `214` onto `235`, and treat `653`
+  as an open item rather than a translation;
 - give the title music, RNG and fixed-jiffy wait helper native C128 entry
   points inside the gateway window; and
 - make the title/flight character-set switch explicit, using two of the four
-  2 KB slots inside the `GRAPHIC 1` reserve.
+  2 KB slots inside the `GRAPHIC 1` reserve, and switch it through the `$0A2C`
+  shadow rather than `$D018` alone (evidence item 15).
 
 Do not execute BASIC ROM by accident: every `SYS` target must be inside
 `$1300-$1BFF`, which the builder enforces.
@@ -368,8 +458,21 @@ more sprites, bitmap graphics or VDC support are separate proposals.
   escapes `$1300-$1BFF`, rejects a BASIC load address other than `$1C01`, and
   writes `build/c128-phase0-layout.json`.
 - Phase 0 embeds the gateway as BASIC `DATA`, so the artifact is one ordinary
-  BASIC 7 program with no custom loader. That stops scaling once the real
-  music and RNG blobs are involved; `src/c128/loader.s` takes over then.
+  BASIC 7 program with no custom loader. 2,057 bytes of helper would need about
+  8 KB of `DATA` text, so Phase 1 switched to a **staged payload**: the builder
+  pads the PRG out to a fixed stage address, appends the payload image there,
+  and the BASIC program's first action copies it down into `$1300-$1BFF`.
+  No loader, so no address that has not been proven.
+- **The staged copy must run under `BANK 0`.** The stage sits above the BASIC
+  text, therefore under BASIC LO ROM, so a `BANK 15` `PEEK` of the stage returns
+  ROM instead of the payload that was just loaded there. This is evidence item 7
+  biting in practice: the first Phase 1 run copied 2,278 bytes of BASIC ROM into
+  the gateway window and hung in the RNG's TOD wait. `BANK 0` for the loop and
+  `BANK 15` immediately after is the whole fix, and it is the pattern every
+  future access to staged data must follow.
+- The copy loop is interpreted BASIC and takes a couple of seconds. That is a
+  one-time title-screen cost and buys the absence of an unproven loader; revisit
+  it only if it lands somewhere the player notices.
 - The initial artifact is a PRG. A PRG cannot self-boot: reaching the title
   still costs a `RUN`. A `.d71` with a C128 autoboot sector is the only way to
   get a true boot, and it is the last milestone-1 item, not a prerequisite.
@@ -386,6 +489,7 @@ with `verify-bank2.py`. Its checks, and their state:
 | 1 | native boot: BASIC 7 at `$1C01`, `+go64`, no `GO64` path | done |
 | 2 | 40-column VIC screen at `$0400`, `$D7` = 0 | done |
 | 3 | `$D018`, `$DD00` bits 0-1, `$D506` bits 6-7, `$D505` | done |
+| 3a | charset switch survives an interrupt via the `$0A2C` shadow | done |
 | 4 | `GRAPHIC 1` relocation: `TXTTAB` `$1C01` -> `$4001` | done |
 | 5 | RAM under ROM: `BANK 15` vs `BANK 0` vs the `$FF00` window | done |
 | 6 | gateway entered, returned, `$FF00` restored, I/O intact | done |
@@ -399,7 +503,11 @@ with `verify-bank2.py`. Its checks, and their state:
 | 13 | controlled landing, crash/`BUMP(2)`, refuel and explosion | Phase 2 |
 | 14 | attract entry/exit and high-score suppression | Phase 2 |
 | 15 | long re-entry test: strings in bank 1 cannot reach bank-0 video | Phase 2 |
-| 16 | joystick reads at `$DC00` survive the C128 keyboard scan | Phase 1 |
+| 16 | joystick reads at `$DC00` survive the C128 keyboard scan | done |
+| 16a | a C128 replacement for `PEEK(653)`, needing a held-modifier probe | **open** |
+| 17 | interpreted wait is exact at two different counts (no 6/5 error) | done |
+| 18 | player publishes its loop length in C128 jiffies | done |
+| 19 | the C64 helper blobs are byte-identical to their pre-C128 hashes | done |
 
 Every check prints its observed value, so a failure names the offending
 register or address instead of only the expectation.
@@ -431,12 +539,15 @@ The first milestone is complete when all of the following are true:
 | --- | --- |
 | BASIC 7 flight is slower than C64 Blitz | Measure motion/timing first. BASIC 7's interpreter loop and its heavier KERNAL interrupt both cost more per statement than BASIC 2, and `SPRITE`/`MOVSPR` shift work from POKEs into the interpreter. Do not alter physics; choose a C128-native compiler or a tightly scoped helper only after an evidence-backed decision. |
 | Attitude changes become 64-byte copies | The C64 build swaps a sprite pointer; `$0E00` holds only eight live shapes, so a shape change is a block copy. Measure it in the flight loop in Phase 2; a pointer-swap scheme inside `$0E00-$0FFF` is the fallback. |
-| Gateway window is 256 bytes too small | `$1300-$1BFF` is 2,304 bytes against the C64 hole's 2,560. Measure the assembled music and RNG sizes; move the 1 KB RNG table to bank 1 behind the `$FF00` window if needed. |
+| ~~Gateway window is 256 bytes too small~~ | Closed by measurement. The helpers assemble to 2,057 bytes against the window's 2,304; the C64 figure of 2,560 was the declared hole, not its contents. |
+| The 50 Hz interrupt breaks other C64 timing assumptions | `wait` and `step_ticks` are fixed and verified. Audit anything else that counts interrupts or treats a tick as a jiffy before Phase 2, and measure NTSC separately. |
+| `PEEK(653)` reads 255 on the C128, so the alternate fire is stuck on | Open. Do not ship the C128 edition with `653` in the input path; verification row 16a must land first. |
 | A ported player replaces the IRQ instead of chaining | Rejected on design grounds: `BUMP()` accumulation and `MOVSPR` motion both run in the KERNAL interrupt. Not yet measured; verification check 10 must confirm it before the claim is treated as evidence. |
 | `SOUND`/`PLAY`/`VOL` mixed into the build | Rejected. They rewrite SID registers the ported player owns. Effects stay in the ported helper. |
 | C128 keyboard scan interferes with `PEEK(56320)` joystick reads | Add verification check 16 before trusting the joystick path; the C128 scans more key lines than the C64. |
 | C128 character ROM differs from the C64 font used by the title builder | Capture/verify the native VIC charset, then regenerate only the title charset if necessary. Preserve custom title glyph design. |
 | 2 MHz is proposed as a flight optimization | Reject it for this VIC-IIe edition; it disables the visible 40-column display. |
+| A `$D018` write is assumed to stick | The editor's interrupt reloads it from `$0A2C`. Write the shadow, and never assert a video register immediately after writing it; wait an interrupt first. |
 | A change also modifies C64 behavior | Stop and separate the code paths. The C64 canonical game has priority. |
 
 ## Explicit non-goals

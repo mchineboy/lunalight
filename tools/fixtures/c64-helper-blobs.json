@@ -1,0 +1,17 @@
+{
+  "note": "Recorded from src/music.s and src/rng.s at commit 549c9cf, before the C128 edition introduced any conditional assembly into them. The C128 build reuses these sources behind assembly-time defines rather than forking them, so the title theme and the PRNG cannot drift between editions. These hashes are the guard: any edit that changes what the canonical C64 build gets out of them fails make c128-parity.",
+  "blobs": {
+    "music.prg": {
+      "source": "src/music.s",
+      "config": "tools/music.cfg",
+      "bytes": 494,
+      "sha256": "275e101d54f27eeb3eae205df3860a171a0873124deda44773dfdec1596c92df"
+    },
+    "rng.prg": {
+      "source": "src/rng.s",
+      "config": "tools/rng.cfg",
+      "bytes": 2050,
+      "sha256": "6c7259a360279fc4e7f952fc27f97da0707c2fdc1beba3075d18a5acbffe7c92"
+    }
+  }
+}

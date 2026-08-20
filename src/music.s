@@ -16,8 +16,14 @@
 
 .setcpu "6502"
 
+; The C128 edition assembles this same player at a different home; see
+; docs/c128-vic-design.md. Undefined means the canonical C64 address.
+.ifndef LOAD_ADDR
+LOAD_ADDR = $4200
+.endif
+
 .segment "LOADADDR"
-    .word $4200
+    .word LOAD_ADDR
 
 .segment "CODE"
 
@@ -45,7 +51,23 @@ irq_vector         = $0314
 ;   22 ticks = 0.367s = 164 BPM   (current)
 ;   24 ticks = 0.400s = 150 BPM
 ;   29 ticks = 0.483s = 124 BPM   (only integer tick count inside 122-126 BPM)
-step_ticks      = 22
+; The tick rate is the KERNAL interrupt rate, not a constant across machines.
+; The C64's is CIA-driven at ~60Hz on PAL and NTSC alike, which is what makes a
+; single tempo constant serve both. The C128's runs at 50Hz on PAL (measured),
+; so it needs its own value: 18 ticks is 0.360s against the C64's 0.367s.
+.ifndef STEP_TICKS
+STEP_TICKS = 22
+.endif
+step_ticks      = STEP_TICKS
+
+; Jiffies per interrupt tick, as a ratio. 1/1 wherever the interrupt runs at the
+; jiffy rate; 6/5 on a 50Hz-interrupt C128 whose jiffy clock still counts 60.
+.ifndef LOOP_JIFFY_NUM
+LOOP_JIFFY_NUM = 1
+.endif
+.ifndef LOOP_JIFFY_DEN
+LOOP_JIFFY_DEN = 1
+.endif
 
 ; The chord turns over every four beats. The melody arpeggiates one triad across
 ; a whole eight-step bar, so each half-bar is re-footed under a bass note that
@@ -73,7 +95,11 @@ note_rest = $01
 ; hand-off to the music: PEEK(16902)+PEEK(16903)*256. Assembled from the tempo
 ; and length constants, so the title stays in sync if either changes.
 loop_jiffies:
-    .word sequence_length * step_ticks
+    ; Published in jiffies, because the title compares it against TI. Ticks and
+    ; jiffies are the same unit only when the interrupt runs at the jiffy rate;
+    ; on the C128 they differ by 6/5, so the ratio is a define rather than an
+    ; assumption. C64: 48 * 22 = 1056. C128: 48 * 18 * 6 / 5 = 1036.
+    .word sequence_length * step_ticks * LOOP_JIFFY_NUM / LOOP_JIFFY_DEN
 
 install:
     ; uninstall first so a second SYS 16896 without an intervening SYS 16899

@@ -63,6 +63,61 @@ def data_lines(blob: bytes, first_line: int, step: int, per_line: int) -> list[s
     return lines
 
 
+def assemble_blob(spec: str, out_dir: Path, ca65: str, ld65: str) -> tuple[int, bytes]:
+    """Assemble one ADDR:SOURCE:CONFIG[:DEFINE=VALUE...] blob specification."""
+    parts = spec.split(":")
+    if len(parts) < 3:
+        raise BuildError(f"--blob needs ADDR:SOURCE:CONFIG, got {spec!r}")
+    address = int(parts[0], 0)
+    source, config = Path(parts[1]), Path(parts[2])
+    defines: list[str] = []
+    for define in parts[3:]:
+        if "=" not in define:
+            raise BuildError(f"--blob define needs NAME=VALUE, got {define!r}")
+        defines += ["-D", define]
+    obj = out_dir / f"{source.stem}-{address:04x}.o"
+    prg = out_dir / f"{source.stem}-{address:04x}.prg"
+    run([ca65, "-t", "none", *defines, "-o", str(obj), str(source)])
+    run([ld65, "-C", str(config), "-o", str(prg), str(obj)])
+    load, body = load_prg(prg)
+    if load != address:
+        raise BuildError(
+            f"{config} links {source.name} at ${load:04X}, --blob asked for "
+            f"${address:04X}"
+        )
+    return load, body
+
+
+def compose_payload(
+    blobs: list[tuple[int, bytes]], window: tuple[int, int]
+) -> tuple[bytes, list[dict[str, object]]]:
+    """Lay the blobs into one contiguous image covering the window."""
+    size = window[1] - window[0] + 1
+    image = bytearray(size)
+    occupied = bytearray(size)
+    regions: list[dict[str, object]] = []
+    for address, body in blobs:
+        end = address + len(body) - 1
+        if address < window[0] or end > window[1]:
+            raise BuildError(
+                f"payload blob ${address:04X}-${end:04X} escapes the window "
+                f"${window[0]:04X}-${window[1]:04X}"
+            )
+        offset = address - window[0]
+        clash = next(
+            (i for i in range(len(body)) if occupied[offset + i]), None
+        )
+        if clash is not None:
+            raise BuildError(
+                f"payload blob at ${address:04X} overlaps an earlier blob at "
+                f"${window[0] + offset + clash:04X}"
+            )
+        image[offset : offset + len(body)] = body
+        occupied[offset : offset + len(body)] = b"\x01" * len(body)
+        regions.append({"name": f"payload@{address:04X}", "start": address, "end": end})
+    return bytes(image), regions
+
+
 def check_layout(regions: list[dict[str, object]]) -> None:
     ordered = sorted(regions, key=lambda region: region["start"])
     for lower, upper in zip(ordered, ordered[1:]):
@@ -77,8 +132,20 @@ def check_layout(regions: list[dict[str, object]]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--basic", type=Path, required=True)
-    parser.add_argument("--gateway", type=Path, required=True)
-    parser.add_argument("--gateway-config", type=Path, required=True)
+    parser.add_argument("--gateway", type=Path)
+    parser.add_argument("--gateway-config", type=Path)
+    parser.add_argument(
+        "--blob",
+        action="append",
+        default=[],
+        metavar="ADDR:SOURCE:CONFIG[:DEFINE=VALUE...]",
+        help="assemble SOURCE with CONFIG and place it at ADDR in the payload",
+    )
+    parser.add_argument(
+        "--stage",
+        type=lambda value: int(value, 0),
+        help="pad the PRG to this address and append the payload image there",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--petcat", default="petcat")
@@ -89,22 +156,54 @@ def main() -> int:
     out_dir = args.out.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    gateway_prg = assemble(
-        args.gateway, args.gateway_config, out_dir, args.ca65, args.ld65
-    )
-    gateway_addr, gateway = load_prg(gateway_prg)
-    gateway_end = gateway_addr + len(gateway) - 1
-    if not (FREE_RAM[0] <= gateway_addr and gateway_end <= FREE_RAM[1]):
-        raise BuildError(
-            f"gateway ${gateway_addr:04X}-${gateway_end:04X} escapes the free "
-            f"bank-0 window ${FREE_RAM[0]:04X}-${FREE_RAM[1]:04X}"
-        )
+    if bool(args.blob) == bool(args.gateway):
+        raise BuildError("pass either --gateway (DATA embedding) or --blob (staged)")
+    if bool(args.blob) != bool(args.stage):
+        raise BuildError("--blob needs --stage and vice versa")
 
-    source = args.basic.read_text().splitlines()
-    body = [line for line in source if not DATA_MARKER.match(line)]
-    if len(body) == len(source):
-        raise BuildError(f"{args.basic} has no line 9000 DATA marker")
-    body += data_lines(gateway, first_line=9000, step=1, per_line=16)
+    regions: list[dict[str, object]] = []
+    payload = b""
+
+    if args.gateway:
+        # Phase 0 packaging: one small helper, embedded as BASIC DATA, so the
+        # artifact is an ordinary BASIC 7 program with no loader at all.
+        gateway_prg = assemble(
+            args.gateway, args.gateway_config, out_dir, args.ca65, args.ld65
+        )
+        gateway_addr, gateway = load_prg(gateway_prg)
+        gateway_end = gateway_addr + len(gateway) - 1
+        if not (FREE_RAM[0] <= gateway_addr and gateway_end <= FREE_RAM[1]):
+            raise BuildError(
+                f"gateway ${gateway_addr:04X}-${gateway_end:04X} escapes the free "
+                f"bank-0 window ${FREE_RAM[0]:04X}-${FREE_RAM[1]:04X}"
+            )
+        source = args.basic.read_text().splitlines()
+        body = [line for line in source if not DATA_MARKER.match(line)]
+        if len(body) == len(source):
+            raise BuildError(f"{args.basic} has no line 9000 DATA marker")
+        body += data_lines(gateway, first_line=9000, step=1, per_line=16)
+        regions.append(
+            {"name": "gateway", "start": gateway_addr, "end": gateway_end}
+        )
+        regions.append(
+            {
+                "name": "results",
+                "start": RESULTS_BLOCK[0],
+                "end": RESULTS_BLOCK[1],
+            }
+        )
+    else:
+        # Phase 1 packaging: the helpers are too large for DATA, so the payload
+        # image is appended to the PRG at a fixed stage address and the BASIC
+        # program copies it down into the gateway window as its first action.
+        # It must copy before GRAPHIC 1, which relocates the text over the
+        # stage.
+        blobs = [
+            assemble_blob(spec, out_dir, args.ca65, args.ld65) for spec in args.blob
+        ]
+        payload, payload_regions = compose_payload(blobs, FREE_RAM)
+        regions.extend(payload_regions)
+        body = args.basic.read_text().splitlines()
 
     spliced = out_dir / f"{args.basic.stem}.spliced.bas"
     spliced.write_text("\n".join(body) + "\n")
@@ -114,12 +213,28 @@ def main() -> int:
     if basic_addr != 0x1C01:
         raise BuildError(f"BASIC 7 text must load at $1C01, got ${basic_addr:04X}")
     basic_end = basic_addr + len(basic) - 1
+    regions.append(
+        {"name": "basic-text-at-load", "start": basic_addr, "end": basic_end}
+    )
 
-    regions = [
-        {"name": "gateway", "start": gateway_addr, "end": gateway_end},
-        {"name": "results", "start": RESULTS_BLOCK[0], "end": RESULTS_BLOCK[1]},
-        {"name": "basic-text-at-load", "start": basic_addr, "end": basic_end},
-    ]
+    if payload:
+        if basic_end >= args.stage:
+            raise BuildError(
+                f"BASIC text ends at ${basic_end:04X}, past the payload stage at "
+                f"${args.stage:04X}; raise the stage or shrink the program"
+            )
+        pad = args.stage - (basic_end + 1)
+        args.out.write_bytes(
+            args.out.read_bytes() + bytes(pad) + payload
+        )
+        regions.append(
+            {
+                "name": "payload-stage",
+                "start": args.stage,
+                "end": args.stage + len(payload) - 1,
+            }
+        )
+
     check_layout(regions)
 
     # After GRAPHIC 1 the interpreter reserves $2000-$3FFF and lifts the text to
@@ -129,18 +244,20 @@ def main() -> int:
     report = {
         "prg": str(args.out),
         "regions": regions,
+        "payload_bytes": len(payload),
         "graphic1": {
             "bitmap_reserve": {"start": 0x2000, "end": 0x3FFF},
             "relocated_text": {"start": 0x4001, "end": relocated_end},
         },
         "free_ram": {"start": FREE_RAM[0], "end": FREE_RAM[1]},
-        "gateway_entries": {
+    }
+    if args.gateway:
+        report["gateway_entries"] = {
             "probe": gateway_addr,
             "irq_on": gateway_addr + 3,
             "irq_off": gateway_addr + 6,
             "results": 0x1340,
-        },
-    }
+        }
     args.report.write_text(json.dumps(report, indent=2) + "\n")
 
     for region in sorted(regions, key=lambda item: item["start"]):

@@ -23,12 +23,20 @@
 ; jiffy clock instead makes every pause identical. BASIC: POKE 679,n : SYS 17420.
 
 JIFFY = $A2                    ; KERNAL jiffy clock, low byte (updated each IRQ)
+; The wait argument and the load address both move on the C128: $02A7 is not
+; free low memory there, and $4400 is under BASIC LO ROM. Undefined means the
+; canonical C64 values. See docs/c128-vic-design.md.
+.ifndef WAITJ
 WAITJ = $02A7                  ; free RAM; BASIC pokes jiffies-to-wait here
+.endif
+.ifndef LOAD_ADDR
+LOAD_ADDR = $4400
+.endif
 
 .setcpu "6502"
 
 .segment "LOADADDR"
-    .word $4400
+    .word LOAD_ADDR
 
 CIA1_TOD10   = $DC08
 CIA1_TODSEC  = $DC09
@@ -49,6 +57,9 @@ SID3_CTRL    = $D412
 SID_OSC3     = $D41B
 
 PTR          = $FB              ; $FB-$FE are free of both BASIC and the KERNAL
+                                ; on the C64. The C128 makes no such promise, so
+                                ; the C128 build saves, masks and restores around
+                                ; the only routine that uses them.
 
 NUM_SAMPLES  = 32
 
@@ -143,6 +154,14 @@ wait_tod:
 ; reloaded here rather than carried across the call.
 
 refill:
+.ifdef C128
+    php
+    sei
+    lda PTR
+    sta ptr_save
+    lda PTR+1
+    sta ptr_save+1
+.endif
     lda #<table
     sta PTR
     lda #>table
@@ -173,6 +192,13 @@ rquad:
 rnocarry:
     dec pages
     bne rquad
+.ifdef C128
+    lda ptr_save
+    sta PTR
+    lda ptr_save+1
+    sta PTR+1
+    plp
+.endif
     rts
 
 ; ------------------------------------------------------------------- stir ---
@@ -185,12 +211,37 @@ stir:
     jmp mix
 
 ; ------------------------------------------------------------------- wait ---
-; Block for WAITJ jiffies. Each jiffy is one increment of the KERNAL clock's
-; low byte, detected by watching for it to change, which is wrap-safe and needs
-; no multi-byte arithmetic. Any active IRQ that advances the jiffy clock (the
-; KERNAL default or the title music player) drives it; a zero count returns at
-; once.
+; Block for WAITJ jiffies. A zero count returns at once.
+;
+; The C64 detects each jiffy by watching the KERNAL clock's low byte change,
+; which is wrap-safe and needs no multi-byte arithmetic. That works because the
+; C64's KERNAL interrupt is CIA-driven at ~60Hz, so it advances the clock by
+; exactly one every time.
+;
+; The C128 breaks that assumption. Measured under x128 PAL: the KERNAL interrupt
+; runs at 50Hz while the jiffy clock is still stepped to 60Hz nominal, so one
+; interrupt in six advances it by two. Counting changes therefore counts five
+; where six elapsed, and every wait came out 6/5 too long: 60 requested, 72
+; measured; 15 requested, 18 measured. The C128 build compares against a target
+; instead, which is exact whatever the step size, at the cost of a subtraction
+; per poll.
 
+.ifdef C128
+wait:
+    lda WAITJ
+    beq wc128_done
+    sta wtarget
+    lda JIFFY
+    sta wstart
+wpoll:
+    lda JIFFY
+    sec
+    sbc wstart                  ; elapsed jiffies, wrap-safe for counts <= 255
+    cmp wtarget
+    bcc wpoll
+wc128_done:
+    rts
+.else
 wait:
     lda WAITJ
     beq wdone
@@ -204,6 +255,7 @@ wsame:
     bne wtick
 wdone:
     rts
+.endif
 
 ; -------------------------------------------------------------------- mix ---
 ; state = rotl32(state,5); state += a; state += $9e3779b9; state[2] ^= a
@@ -348,6 +400,11 @@ raw_lo:  .byte 0
 nsamp:   .byte 0
 idx:     .byte 0
 pages:   .byte 0
+.ifdef C128
+ptr_save: .word 0
+wstart:   .byte 0
+wtarget:  .byte 0
+.endif
 
 .segment "RNGTAB"
 
