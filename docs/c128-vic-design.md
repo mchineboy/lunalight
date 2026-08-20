@@ -74,7 +74,7 @@ player owns.
 
 ## Evidence gathered before implementation
 
-Items 1-5 were the pre-Phase-0 desk analysis. Items 6-19 are measured, and
+Items 1-5 were the pre-Phase-0 desk analysis. Items 6-21 are measured, and
 `make verify-c128-vic` re-measures them on every change.
 
 1. `petcat -w70` tokenizes the present BASIC text as C128 BASIC 7.0 at `$1C01`
@@ -216,7 +216,47 @@ Items 1-5 were the pre-Phase-0 desk analysis. Items 6-19 are measured, and
     195, 244. So the C64 pointer values can be written once and left alone, and
     BASIC 7's own `$0E00` sprite area is never consulted. That is what makes the
     un-renumbered payload workable and what frees `$0E00` for other use.
-19. The C64 editor and keyboard constants, measured with the cursor deliberately
+19. **Direct writes to the VIC sprite coordinate registers do not take effect on
+    the C128.** BASIC 7 owns `$D000-$D010` and rewrites them from its own sprite
+    table inside the interrupt, so a `POKE` there is discarded within a statement
+    or two. Measured:
+
+    ```text
+    POKE 53248,124            -> PEEK(53248) reads 0, immediately and after 1s
+    MOVSPR 1,124,104          -> PEEK(53248) reads 124, PEEK(53249) reads 104
+    POKE 53248,60 afterwards  -> still reads 124; the POKE is ignored
+    ```
+
+    This is not a variant of the `$D018`/`$0A2C` shadow, where the write lands
+    and is later overwritten. Here the write never lands at all.
+
+    So `MOVSPR` is **mandatory**, not stylistic: the "BASIC 7 native sprites"
+    decision is now forced by the hardware rather than chosen for elegance. The
+    scope is narrower than it sounds, because the other sprite registers behave
+    normally -- measured at the C128 title, with the C64's own `POKE`s
+    unchanged:
+
+    | register | C64 `POKE` on the C128 |
+    | --- | --- |
+    | `$D000-$D010` positions | **discarded**; use `MOVSPR` |
+    | `$D015` enable | works (`$FF` observed) |
+    | `$D027-$D02E` colour | works (1,0,1,6,1,6,7,15 observed) |
+    | `$07F8-$07FF` pointers | works (evidence item 18) |
+
+    Converting the positions is not a mechanical substitution, because `MOVSPR`
+    sets both coordinates at once while the C64 code updates X and Y
+    independently and manages the `$D010` MSB by hand. `MOVSPR n,x,RSPPOS(n,1)`
+    covers an X-only update and `MOVSPR n,RSPPOS(n,0),y` a Y-only one, but the
+    high-X logic has to be read rather than rewritten blindly: it is where the
+    landing-verdict geometry lives, and that is a stated invariant.
+20. **`DS` is a reserved system variable in BASIC 7.** `DS` and `DS$` return the
+    disk status, and `ER`/`EL` come with `TRAP`, none of which the C64 reserves.
+    The canonical source uses `ds` as the terrain step direction, so
+    `src/lunalight.bas:154` runs on the C64 and is a `?SYNTAX ERROR` on the C128
+    -- raised only when that line happens to execute, which is why it surfaced
+    as a crash out of attract mode rather than at load. `TI` is reserved on both
+    machines and the source uses it deliberately as the jiffy clock, so it stays.
+21. The C64 editor and keyboard constants, measured with the cursor deliberately
     parked on row 8:
 
     | C64 use | C64 address | C128 finding |
@@ -339,7 +379,8 @@ tools/c128-asset.py             Headers and truncates one asset file   DONE
 tools/c128-music.cfg            Player linked into the gateway window  DONE
 tools/c128-rng.cfg              RNG and its table, same window         DONE
 tools/c128-parity.py            Proves the C64 helper blobs unchanged  DONE
-src/c128/lunalight.bas          Native BASIC 7 gameplay/control source
+tools/c128-port.py              Generates the C128 BASIC source          DONE
+build/c128-lunalight.bas        Generated; never hand-edited, never committed
 ```
 
 There is deliberately no `src/c128/music.s` or `src/c128/rng.s`. The two
@@ -417,7 +458,7 @@ Port only the C64-specific runtime assumptions first:
   low memory on the C128, so the ported helper takes its argument from an
   address inside `$1300-$1BFF`;
 - replace the C64 editor and keyboard constants per the measured table in
-  evidence item 19: drop `648` entirely, map `214` onto `235`, and treat `653`
+  evidence item 21: drop `648` entirely, map `214` onto `235`, and treat `653`
   as an open item rather than a translation;
 - give the title music, RNG and fixed-jiffy wait helper native C128 entry
   points inside the gateway window; and
@@ -503,6 +544,28 @@ compensation is that the artifact the definition of done prefers -- a
 self-booting disk -- is now on the critical path rather than deferred behind it.
 An autoboot sector is the remaining piece; `-autostart image.d71:phase2` stands
 in for it during verification.
+
+### Phase 2b: the flight port -- title renders, flight BLOCKED on MOVSPR
+
+`src/c128/lunalight.bas` does not exist and deliberately never will. Keeping a
+hand-edited copy of a 250-line BASIC program beside the original is how a port
+and its source drift apart, and the invariants forbid exactly that. The C128
+program is **generated** instead: `tools/c128-port.py` applies an explicit,
+commented rule set to `src/lunalight.bas` and fails the build if a C64 constant
+survives or a BASIC 7 reserved variable is assigned to. `make c128-vic` produces
+`build/lunalight-c128-vic.d71`.
+
+What works: the disk boots into the title under `x128 +go64`, the licence and
+contributor text, the star field, `PRESS F7 TO START`, `$D015` = `$FF`, the
+title character set at `$2000`, the eight C64 sprite pointers, and the C64
+title colours 1,0,1,6,1,6,7,15 read back exactly.
+
+What does not: every sprite is at X=0, because of evidence item 19 -- the C64's
+position `POKE`s are discarded. The title tableau is therefore unpositioned and
+flight cannot be assessed until the positions go through `MOVSPR`. That is the
+next piece of work, and it is the first one in this port that touches gameplay
+logic rather than plumbing, so it needs the motion oracle alongside it rather
+than after it.
 
 ### Phase 2 bring-up order, once unblocked
 
@@ -649,6 +712,7 @@ The first milestone is complete when all of the following are true:
 | C128 character ROM differs from the C64 font used by the title builder | Capture/verify the native VIC charset, then regenerate only the title charset if necessary. Preserve custom title glyph design. |
 | 2 MHz is proposed as a flight optimization | Reject it for this VIC-IIe edition; it disables the visible 40-column display. |
 | Staged data is assumed to survive `GRAPHIC 1` | It does not, above `$4000`. Anything the relocation must not eat has to live below `$4000` or come off disk after the fact. |
+| A VIC register write is assumed to land | Sprite positions do not land at all; `$D018` lands and is then overwritten. Neither can be asserted by reading straight back, and neither is safe to POKE. Check the register through VICE's `io` bank, not the CPU bank, or the read returns character ROM. |
 | A `$D018` write is assumed to stick | The editor's interrupt reloads it from `$0A2C`. Write the shadow, and never assert a video register immediately after writing it; wait an interrupt first. |
 | A change also modifies C64 behavior | Stop and separate the code paths. The C64 canonical game has priority. |
 

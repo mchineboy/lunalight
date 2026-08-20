@@ -93,6 +93,13 @@ C128_CHARSET_PRG := $(BUILD_DIR)/c128-charset.prg
 C128_SPRITES_PRG := $(BUILD_DIR)/c128-sprites.prg
 C128_PHASE2_BASIC := $(BUILD_DIR)/c128-phase2-basic.prg
 C128_PHASE2_D71 := $(BUILD_DIR)/lunalight-c128-phase2.d71
+# The playable edition. Its BASIC source is generated from the canonical C64
+# source by an explicit rule set rather than hand-maintained, so the two cannot
+# drift; tools/c128-port.py fails the build if a C64 constant survives.
+C128_PORT_DRIVER := $(TOOLS_DIR)/c128-port.py
+C128_GAME_SRC := $(BUILD_DIR)/c128-lunalight.bas
+C128_GAME_BASIC := $(BUILD_DIR)/c128-lunalight.prg
+C128_GAME_D71 := $(BUILD_DIR)/lunalight-c128-vic.d71
 
 # MOSpeed: native 6502 BASIC V2 cross-compiler (EgonOlsen71/basicv2).
 # It compiles the canonical source and reserves the canonical bank-2 asset
@@ -161,7 +168,8 @@ GIF_DRIVER := $(TOOLS_DIR)/make-gameplay-gif.py
 	verify-baseline record-blitz-baseline verify-blitz-gameplay verify-blitz-motion \
 	verify-bank0-motion verify-bank2-motion verify-bank2 verify-bank2-capacity \
 	bank2-capacity c128-vic run-c128-vic verify-c128-vic \
-	verify-c128-phase0 verify-c128-phase1 verify-c128-phase2 c128-parity
+	verify-c128-phase0 verify-c128-phase1 verify-c128-phase2 c128-parity \
+	run-c128-game
 
 # Every VICE-driven target owns the emulator, its binary monitor port and its
 # screenshots; parallel makes would interleave them.
@@ -546,7 +554,28 @@ $(C128_PHASE2_D71): $(C128_PHASE2_BASIC) $(C128_MUSIC_PRG) $(C128_RNG_PRG) \
 		-write $(C128_CHARSET_PRG) charset \
 		-write $(C128_SPRITES_PRG) sprites
 
-c128-vic: $(C128_PHASE0_PRG) $(C128_PHASE1_PRG) $(C128_PHASE2_D71)
+$(C128_GAME_SRC): $(SRC_CANONICAL) $(C128_PORT_DRIVER) | $(BUILD_DIR)
+	$(PYTHON) $(C128_PORT_DRIVER) $(SRC_CANONICAL) $@
+
+$(C128_GAME_BASIC): $(C128_GAME_SRC)
+	$(PETCAT) -w70 -o $@ -- $<
+
+$(C128_GAME_D71): $(C128_GAME_BASIC) $(C128_MUSIC_PRG) $(C128_RNG_PRG) \
+		$(C128_CHARSET_PRG) $(C128_SPRITES_PRG)
+	rm -f $@
+	$(C1541) -format "lunalight c128,01" d71 $@ \
+		-write $(C128_GAME_BASIC) lunalight \
+		-write $(C128_MUSIC_PRG) music \
+		-write $(C128_RNG_PRG) rng \
+		-write $(C128_CHARSET_PRG) charset \
+		-write $(C128_SPRITES_PRG) sprites
+
+c128-vic: $(C128_PHASE0_PRG) $(C128_PHASE1_PRG) $(C128_PHASE2_D71) \
+	$(C128_GAME_D71)
+
+run-c128-game: $(C128_GAME_D71)
+	$(X128) -default +go64 +autostart-delay-random \
+		-autostart '$(C128_GAME_D71):lunalight'
 
 # Native mode only: +go64 keeps the machine in C128 mode across the reset.
 run-c128-vic: $(C128_PHASE0_PRG)
